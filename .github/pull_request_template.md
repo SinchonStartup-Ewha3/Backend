@@ -1,7 +1,6 @@
 ## 🔎 What is this PR?
 
-- (프론트엔드) 관련 와이어프레임 또는 프로토타입 이미지
-- (백엔드) 관련 API 명세서 링크
+- 관련 API 명세서 링크
 
 ## ✨ Changes
 
@@ -18,5 +17,6 @@
 - 집중적으로 리뷰를 원하는 부분이 있다면 작성해 주세요.
 
 ## 🔗 관련 이슈
-Related #n
-Closes #n
+
+- Related #n
+- Closes #n
