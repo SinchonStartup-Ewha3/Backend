@@ -62,6 +62,7 @@ INSTALLED_APPS = [
     "fortune",
     "mypage",
     "ads",
+    "core",
 ]
 
 MIDDLEWARE = [
@@ -115,7 +116,7 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/6.1/topics/i18n/
 
-AUTH_USER_MODEL = 'auth.User'
+AUTH_USER_MODEL = 'accounts.User'
 
 LANGUAGE_CODE = "ko-kr"
 
