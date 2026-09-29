@@ -66,7 +66,7 @@ class PostSerializer(serializers.ModelSerializer):
 
         if len(value) > 200:
             raise serializers.ValidationError(
-                "게시글 내용은 2000자 이하여야 합니다."
+                "게시글 내용은 200자 이하여야 합니다."
             )
 
         return value

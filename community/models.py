@@ -14,7 +14,9 @@ class Post(models.Model):
         related_name="community_posts",
     )
 
-    content = models.TextField()
+    content = models.CharField(
+    max_length=200,
+    )
 
     
     tag = models.CharField(

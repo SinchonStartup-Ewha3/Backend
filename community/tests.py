@@ -57,8 +57,8 @@ class PostAPITests(APITestCase):
         response = self.client.post(
             self.create_url,
             {
-                "content": "오늘 조금 추워요.",
-                "tag": "cold",
+                "content": "가디건",
+                "tag": "cardigan",
             },
             format="multipart",
         )
@@ -76,8 +76,8 @@ class PostAPITests(APITestCase):
         response = self.client.post(
             self.create_url,
             {
-                "content": "오늘 날씨가 좋아요.",
-                "tag": "normal",
+                "content": "패당",
+                "tag": "padded",
             },
             format="multipart",
         )
@@ -96,13 +96,12 @@ class PostAPITests(APITestCase):
 
         self.assertEqual(
             post.user,
-            # 빈칸 5: 게시글을 작성한 사용자
-            self._____,
+            self.author
         )
 
         self.assertEqual(
             post.tag,
-            "normal",
+            "padded",
         )
 
         self.assertFalse(bool(post.image))
@@ -115,8 +114,8 @@ class PostAPITests(APITestCase):
         response = self.client.post(
             self.create_url,
             {
-                "content": "사진과 함께 등록합니다.",
-                "tag": "hot",
+                "content": "코트",
+                "tag": "coat",
                 "image": self.make_test_image(),
             },
             format="multipart",
@@ -139,7 +138,7 @@ class PostAPITests(APITestCase):
             self.create_url,
             {
                 "content": "잘못된 태그입니다.",
-                "tag": "rain",
+                "tag": "shoes",
             },
             format="multipart",
         )
@@ -163,7 +162,7 @@ class PostAPITests(APITestCase):
             self.create_url,
             {
                 "content": "   ",
-                "tag": "cold",
+                "tag": "coat",
             },
             format="multipart",
         )
@@ -182,7 +181,7 @@ class PostAPITests(APITestCase):
         post = Post.objects.create(
             user=self.author,
             content="수정 전 내용",
-            tag=Post.Tag.COLD,
+            tag=Post.Tag.CARDIGAN
         )
 
         self.client.force_authenticate(
@@ -198,7 +197,7 @@ class PostAPITests(APITestCase):
             detail_url,
             {
                 "content": "수정된 내용",
-                "tag": "hot",
+                "tag": "padded",
             },
             format="multipart",
         )
@@ -224,12 +223,11 @@ class PostAPITests(APITestCase):
         post = Post.objects.create(
             user=self.author,
             content="작성자의 게시글",
-            tag=Post.Tag.NORMAL,
+            tag=Post.Tag.PADDED,
         )
 
         self.client.force_authenticate(
-            # 빈칸 6: 작성자가 아닌 다른 사용자
-            user=self._____,
+            user=self.other_user,
         )
 
         detail_url = reverse(
