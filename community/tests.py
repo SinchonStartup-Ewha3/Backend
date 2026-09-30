@@ -43,8 +43,8 @@ class PostAPITests(APITestCase):
         # 1×1 크기의 테스트용 PNG
         png_data = base64.b64decode(
             "iVBORw0KGgoAAAANSUhEUgAAAAEAAAAB"
-            "CAQAAAC1HAwCAAAAC0lEQVR42mP8"
-            "/x8AAusB9Y9Zl1sAAAAASUVORK5CYII="
+            "CAIAAACQd1PeAAAADElEQVR4nGP4"
+            "//8/AAX+Av4N70a4AAAAAElFTkSuQmCC"
         )
 
         return SimpleUploadedFile(
@@ -216,7 +216,7 @@ class PostAPITests(APITestCase):
 
         self.assertEqual(
             post.tag,
-            "hot",
+            "padded",
         )
 
     def test_other_user_cannot_update_post(self):

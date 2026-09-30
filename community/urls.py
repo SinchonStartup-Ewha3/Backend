@@ -1,20 +1,10 @@
-from django.conf import settings
-from django.conf.urls.static import static
-from django.contrib import admin
-from django.urls import include, path
+from django.urls import path
 
+from .views import PostDetailView, PostListCreateView
+
+app_name = "community"
 
 urlpatterns = [
-    path("admin/", admin.site.urls),
-    path("api/auth/", include("accounts.urls")),
-    path(
-        "api/community/",
-        include("community.urls"),
-    ),
+    path("posts/", PostListCreateView.as_view(), name="post-list-create"),
+    path("posts/<int:post_id>/", PostDetailView.as_view(), name="post-detail"),
 ]
-
-if settings.DEBUG:
-    urlpatterns += static(
-        settings.MEDIA_URL,
-        document_root=settings.MEDIA_ROOT,
-    )
