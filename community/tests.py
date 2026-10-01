@@ -9,7 +9,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import Post
+from .models import Post, PostLike
 
 
 User = get_user_model()
@@ -153,6 +153,20 @@ class PostAPITests(APITestCase):
             response.data,
         )
 
+    def test_tag_is_required(self):
+        # [기능] 게시물 작성 시 태그를 반드시 선택해야 한다.
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.post(
+            self.create_url,
+            {"content": "태그가 없는 게시물"},
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tag", response.data)
+        self.assertEqual(Post.objects.count(), 0)
+
     def test_empty_content_is_rejected(self):
         self.client.force_authenticate(
             user=self.author,
@@ -189,7 +203,7 @@ class PostAPITests(APITestCase):
         )
 
         detail_url = reverse(
-            "community:post-detail",
+            "community:post-update",
             kwargs={"post_id": post.pk},
         )
 
@@ -231,7 +245,7 @@ class PostAPITests(APITestCase):
         )
 
         detail_url = reverse(
-            "community:post-detail",
+            "community:post-update",
             kwargs={"post_id": post.pk},
         )
 
@@ -254,3 +268,115 @@ class PostAPITests(APITestCase):
             post.content,
             "작성자의 게시글",
         )
+
+    def test_feed_requires_tag(self):
+        # [기능] 피드 화면에서도 세 태그 중 하나를 선택해야 한다.
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.get(self.create_url)
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tag", response.data)
+
+    def test_feed_filters_posts_by_tag(self):
+        # [기능] 선택한 태그에 해당하는 게시물만 피드에 표시한다.
+        Post.objects.create(
+            user=self.author,
+            content="가디건 게시물",
+            tag=Post.Tag.CARDIGAN,
+        )
+        Post.objects.create(
+            user=self.author,
+            content="코트 게시물",
+            tag=Post.Tag.COAT,
+        )
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.get(self.create_url, {"tag": "cardigan"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["tag"], "cardigan")
+        self.assertEqual(response.data["results"][0]["tagLabel"], "가디건")
+        self.assertIn("createdAtDisplay", response.data["results"][0])
+        self.assertEqual(response.data["results"][0]["likeCount"], 0)
+        self.assertFalse(response.data["results"][0]["isLiked"])
+        self.assertNotIn("author", response.data["results"][0])
+        self.assertNotIn("authorProfileImage", response.data["results"][0])
+
+    def test_feed_rejects_invalid_tag(self):
+        # [기능] 정의되지 않은 태그로는 피드를 조회할 수 없다.
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.get(self.create_url, {"tag": "shoes"})
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tag", response.data)
+
+    def test_post_detail_get_is_not_available(self):
+        # [기능] 모든 정보는 피드에 있으므로 별도 상세 조회는 제공하지 않는다.
+        post = Post.objects.create(
+            user=self.author,
+            content="피드에서 볼 게시물",
+            tag=Post.Tag.PADDED,
+        )
+        self.client.force_authenticate(user=self.author)
+        update_url = reverse(
+            "community:post-update",
+            kwargs={"post_id": post.pk},
+        )
+
+        response = self.client.get(update_url)
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_405_METHOD_NOT_ALLOWED,
+        )
+
+    def test_user_can_toggle_post_like(self):
+        # [기능] 첫 클릭은 좋아요, 두 번째 클릭은 좋아요 취소
+        post = Post.objects.create(
+            user=self.author,
+            content="좋아요 테스트 게시물",
+            tag=Post.Tag.COAT,
+        )
+        self.client.force_authenticate(user=self.other_user)
+        like_url = reverse(
+            "community:post-like-toggle",
+            kwargs={"post_id": post.pk},
+        )
+
+        like_response = self.client.post(like_url)
+
+        self.assertEqual(like_response.status_code, status.HTTP_200_OK)
+        self.assertTrue(like_response.data["isLiked"])
+        self.assertEqual(like_response.data["likeCount"], 1)
+        self.assertTrue(
+            PostLike.objects.filter(post=post, user=self.other_user).exists()
+        )
+
+        unlike_response = self.client.post(like_url)
+
+        self.assertEqual(unlike_response.status_code, status.HTTP_200_OK)
+        self.assertFalse(unlike_response.data["isLiked"])
+        self.assertEqual(unlike_response.data["likeCount"], 0)
+        self.assertFalse(
+            PostLike.objects.filter(post=post, user=self.other_user).exists()
+        )
+
+    def test_feed_shows_like_count_and_current_user_state(self):
+        # [기능] 피드에 좋아요 수와 로그인 사용자의 좋아요 여부 표시
+        post = Post.objects.create(
+            user=self.author,
+            content="좋아요가 있는 게시물",
+            tag=Post.Tag.PADDED,
+        )
+        PostLike.objects.create(post=post, user=self.other_user)
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.get(self.create_url, {"tag": "padded"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        feed_post = response.data["results"][0]
+        self.assertEqual(feed_post["likeCount"], 1)
+        self.assertTrue(feed_post["isLiked"])

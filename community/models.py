@@ -14,11 +14,10 @@ class Post(models.Model):
         related_name="community_posts",
     )
 
-    content = models.CharField(
-    max_length=200,
-    )
+   
+    content = models.CharField(max_length=200)
 
-    
+
     tag = models.CharField(
         max_length=10,
         choices=Tag.choices,
@@ -39,3 +38,25 @@ class Post(models.Model):
 
     def __str__(self):
         return f"{self.user_id}: {self.content[:20]}"
+
+
+class PostLike(models.Model):
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="community_post_likes",
+    )
+    post = models.ForeignKey(
+        Post,
+        on_delete=models.CASCADE,
+        related_name="likes",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user", "post"],
+                name="unique_user_post_like",
+            )
+        ]
