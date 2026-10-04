@@ -5,6 +5,7 @@ import requests
 from django.db import transaction
 
 from .models import User, SocialAccount
+from .models import TEMP_NICKNAME_PREFIX
 
 
 class SocialAuthError(Exception):
@@ -18,6 +19,7 @@ class SocialProfile:
     provider_uid: str
     nickname: str | None
     profile_image: str | None
+    email: str | None = None
 
 
 def get_kakao_profile(access_token: str) -> SocialProfile:
@@ -34,11 +36,13 @@ def get_kakao_profile(access_token: str) -> SocialProfile:
         raise SocialAuthError("유효하지 않은 카카오 토큰입니다.")
 
     data = resp.json()
-    profile = data.get("kakao_account", {}).get("profile", {})
+    account = data.get("kakao_account", {})
+    profile = account.get("profile", {})
     return SocialProfile(
         provider_uid=str(data["id"]),
         nickname=profile.get("nickname"),
         profile_image=profile.get("profile_image_url"),
+        email=account.get("email"),  # 사용자가 동의하지 않으면 None
     )
 
 
@@ -50,23 +54,28 @@ PROFILE_FETCHERS = {
 
 def generate_temp_nickname() -> str:
     while True:
-        nickname = f"user_{uuid.uuid4().hex[:8]}"
+        nickname = f"{TEMP_NICKNAME_PREFIX}{uuid.uuid4().hex[:8]}"
         if not User.objects.filter(nickname=nickname).exists():
             return nickname
 
-
 @transaction.atomic
-def get_or_create_social_user(provider: str, profile: SocialProfile) -> tuple[User, bool]:
+def get_or_create_social_user(provider, profile):
     social = (
         SocialAccount.objects.select_related("user")
         .filter(provider=provider, provider_uid=profile.provider_uid)
         .first()
     )
     if social:
+        if profile.email and social.email != profile.email:
+            social.email = profile.email
+            social.save(update_fields=["email"])
         return social.user, False
 
     user = User(nickname=generate_temp_nickname(), profile_image=profile.profile_image)
     user.set_unusable_password()
     user.save()
-    SocialAccount.objects.create(user=user, provider=provider, provider_uid=profile.provider_uid)
+    SocialAccount.objects.create(
+        user=user, provider=provider,
+        provider_uid=profile.provider_uid, email=profile.email,
+    )
     return user, True
