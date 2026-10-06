@@ -189,4 +189,4 @@ if AWS_STORAGE_BUCKET_NAME:
         },
     }
 
-
+CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
