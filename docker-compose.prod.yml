@@ -1,0 +1,18 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+
+    image: sinchon-backend:latest
+    container_name: sinchon-backend-container
+    restart: always
+
+    ports:
+      - "8000:8000"
+
+    env_file:
+      - .env.prod
+
+    environment:
+      DJANGO_SETTINGS_MODULE: configs.settings
