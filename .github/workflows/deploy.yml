@@ -3,7 +3,7 @@ name: Django Docker Image Build & Deploy
 on:
   push:
     branches:
-      - deploy
+      - dev
 
 permissions:
   contents: read
@@ -33,7 +33,7 @@ jobs:
           context: .
           file: ./Dockerfile.prod
           push: true
-          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sinchon-backend:deploy
+          tags: ${{ secrets.DOCKERHUB_USERNAME }}/sinchon-backend:dev
 
       - name: Create remote directory
         uses: appleboy/ssh-action@v1.0.3
