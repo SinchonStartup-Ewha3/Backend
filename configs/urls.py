@@ -26,6 +26,7 @@ urlpatterns = [
     path("api/users/", include("accounts.user_urls")),
     path("api/regions/", include("core.urls")),
     path("api/community/", include("community.urls")),
+    path("api/home/", include("home.urls")),
 ]
 
 if settings.DEBUG:
