@@ -140,3 +140,14 @@ def get_hourly_weather(nx: int, ny: int, hours: int = 24, now: datetime | None =
         if len(result) >= hours:
             break
     return result
+
+def get_user_grid(user) -> tuple[int, int] | None:
+    """GPS 사용자는 실제 좌표, 직접 선택한 사용자는 지역 중심 좌표로 격자를 구한다"""
+    from accounts.models import User
+    from core.geo import latlng_to_grid
+
+    if user.location_mode == User.LocationMode.GPS and user.last_lat is not None:
+        return latlng_to_grid(user.last_lat, user.last_lng)
+    if user.region is not None:
+        return user.region.grid_nx, user.region.grid_ny
+    return None
