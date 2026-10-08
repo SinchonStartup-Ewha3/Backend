@@ -60,3 +60,81 @@ class NotificationSchedule(models.Model):
 
     def __str__(self):
         return f"{self.user.nickname} - {self.name}"
+
+
+class NotificationLog(models.Model):
+    """
+    발송을 시도한 알림을 기록합니다.
+
+    dedupe_key를 고유값으로 두어 같은 사용자에게 같은 알림이
+    여러 번 발송되는 것을 방지합니다.
+    """
+
+    class NotificationType(models.TextChoices):
+        OUTING_WEATHER = "OUTING_WEATHER", "외출 날씨"
+        EXERCISE = "EXERCISE", "운동"
+        LAUNDRY = "LAUNDRY", "빨래"
+        FORTUNE = "FORTUNE", "운세"
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "발송 대기"
+        SENT = "SENT", "발송 완료"
+        FAILED = "FAILED", "발송 실패"
+        SKIPPED = "SKIPPED", "발송 제외"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notification_logs",
+    )
+
+
+    schedule = models.ForeignKey(
+        NotificationSchedule,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="notification_logs",
+    )
+
+    notification_type = models.CharField(
+        max_length=30,
+        choices=NotificationType.choices,
+    )
+
+
+    target_date = models.DateField()
+
+
+    dedupe_key = models.CharField(max_length=150, unique=True)
+
+    title = models.CharField(max_length=100)
+    body = models.TextField()
+
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+
+
+    provider_message_id = models.CharField(
+        max_length=100,
+        blank=True,
+    )
+
+    error_message = models.TextField(blank=True)
+    attempt_count = models.PositiveSmallIntegerField(default=0)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    sent_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["user", "notification_type", "target_date"]),
+            models.Index(fields=["status", "created_at"]),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.notification_type} - {self.status}"
