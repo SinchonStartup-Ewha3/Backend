@@ -35,6 +35,17 @@ if (BASE_DIR / ".env.dev").exists():
 elif (BASE_DIR / ".env.prod").exists():
     environ.Env.read_env(BASE_DIR / ".env.prod")
 
+# 프론트엔드 알림 클릭 시 이동할 기본 주소
+FRONTEND_BASE_URL = env(
+    "FRONTEND_BASE_URL",
+    default="https://weether.kr",
+)
+
+# 스케줄러를 5분마다 실행할 예정이므로 발송 허용 구간도 5분으로 설정합니다.
+WEATHER_NOTIFICATION_WINDOW_MINUTES = env.int(
+    "WEATHER_NOTIFICATION_WINDOW_MINUTES",
+    default=5,
+)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY')
@@ -184,4 +195,20 @@ MAILERS = {
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-
+# 사용자 성향별 알림 발송 시간
+LAUNDRY_NOTIFICATION_HOUR = env.int(
+    "LAUNDRY_NOTIFICATION_HOUR",
+    default=7,
+)
+EXERCISE_MORNING_NOTIFICATION_HOUR = env.int(
+    "EXERCISE_MORNING_NOTIFICATION_HOUR",
+    default=6,
+)
+EXERCISE_EVENING_NOTIFICATION_HOUR = env.int(
+    "EXERCISE_EVENING_NOTIFICATION_HOUR",
+    default=17,
+)
+EXERCISE_GOOD_WEATHER_NOTIFICATION_HOUR = env.int(
+    "EXERCISE_GOOD_WEATHER_NOTIFICATION_HOUR",
+    default=9,
+)
