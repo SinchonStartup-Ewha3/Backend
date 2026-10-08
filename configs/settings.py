@@ -65,6 +65,18 @@ ONESIGNAL_API_URL = env(
 )
 ONESIGNAL_DRY_RUN = env.bool("ONESIGNAL_DRY_RUN", default=True)
 
+# LINER AI 추천 문구 생성 설정
+LINER_API_KEY = env("LINER_API_KEY", default="")
+LINER_API_URL = env(
+    "LINER_API_URL",
+    default="https://platform.liner.com/api/v1/responses",
+)
+LINER_MODEL = env("LINER_MODEL", default="liner-mark")
+LINER_ENABLED = env.bool("LINER_ENABLED", default=False)
+LINER_TIMEOUT_SECONDS = env.int(
+    "LINER_TIMEOUT_SECONDS",
+    default=10,
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
