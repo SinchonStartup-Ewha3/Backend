@@ -9,6 +9,7 @@ from home.services.weather import (
     get_hourly_weather,
 )
 from premium.models import PremiumProfile
+from situations.services.liner_client import generate_notification_copy
 from situations.models import (
     NotificationLog,
     NotificationSchedule,
@@ -220,6 +221,20 @@ def send_due_outing_notifications(
                     hourly_weather=nearby_forecast,
                 )
 
+                title, message = generate_notification_copy(
+                    notification_type="OUTING_WEATHER",
+                    weather_context={
+                        "scheduleName": schedule.name,
+                        "regionName": region.region_name,
+                        "outingTime": outing_datetime.isoformat(),
+                        "coldSensitivity": profile.cold_sensitivity,
+                        "weather": outing_weather,
+                        "nearbyForecast": nearby_forecast[:6],
+                    },
+                    fallback_title=title,
+                    fallback_body=message,
+                )
+
 
                 dedupe_key = (
                     f"outing:{schedule.pk}:{outing_date.isoformat()}"
@@ -390,6 +405,17 @@ def send_daily_preference_notifications(
                     result["skipped"] += 1
                 else:
                     title, message = exercise_message
+                    title, message = generate_notification_copy(
+                        notification_type="EXERCISE",
+                        weather_context={
+                            "regionName": region.region_name,
+                            "exercisePreference": profile.exercise_preference,
+                            "weather": current_weather,
+                            "hourlyForecast": hourly_weather[:12],
+                        },
+                        fallback_title=title,
+                        fallback_body=message,
+                    )
 
                     deliver_notification(
                         user=profile.user,
@@ -420,6 +446,19 @@ def send_daily_preference_notifications(
                 else:
                     title, message = laundry_message
 
+                    title, message = generate_notification_copy(
+                        notification_type="LAUNDRY",
+                        weather_context={
+                            "regionName": region.region_name,
+                            "laundryRainAlert": profile.laundry_rain_alert,
+                            "laundryHumidityAlert": profile.laundry_humidity_alert,
+                            "laundryIndoorTip": profile.laundry_indoor_tip,
+                            "weather": current_weather,
+                            "hourlyForecast": hourly_weather[:12],
+                        },
+                        fallback_title=title,
+                        fallback_body=message,
+                    )
                     deliver_notification(
                         user=profile.user,
                         notification_type=(
