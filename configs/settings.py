@@ -35,6 +35,11 @@ else:
 SECRET_KEY = env('SECRET_KEY')
 KMA_SERVICE_KEY = env("KMA_SERVICE_KEY", default="")
 
+KMA_BASE_URL = env(
+    "KMA_BASE_URL",
+    default="https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0",
+)
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
 
