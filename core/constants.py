@@ -9,3 +9,9 @@ class WeatherCondition(models.TextChoices):
     SLEET = "SLEET", "비/눈"
     SNOW = "SNOW", "눈"
     SHOWER = "SHOWER", "소나기"
+
+class SituationType(models.TextChoices):
+    HYDRATION = "HYDRATION", "수분"
+    LAUNDRY = "LAUNDRY", "빨래"
+    PICNIC = "PICNIC", "피크닉"
+    RUNNING = "RUNNING", "러닝"

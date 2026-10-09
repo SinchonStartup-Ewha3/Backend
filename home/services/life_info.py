@@ -110,12 +110,12 @@ def build_life_info(current: dict, hourly: list[dict]) -> LifeInfo:
     feels = feels if feels is not None else (temp or 15.0)
 
     raining_now = current["condition"] in RAINY_CONDITIONS or (current.get("precipitation") or 0) > 0
-    rain_hour = None if raining_now else _first_rain_hour(hourly)
+    rain_hour = None if raining_now else get_first_rain_hour(hourly)
 
     min_t, max_t = current.get("minTemperature"), current.get("maxTemperature")
     temp_gap = round(max_t - min_t, 1) if min_t is not None and max_t is not None else None
 
-    outfit_code, outfit_label = _outfit(feels)
+    outfit_code, outfit_label = get_outfit(feels)
 
     return LifeInfo(
         umbrella_needed=raining_now or rain_hour is not None,
@@ -126,3 +126,19 @@ def build_life_info(current: dict, hourly: list[dict]) -> LifeInfo:
         character=_character(current, raining_now, feels),
         message=_message(current, feels, raining_now, rain_hour, temp_gap),
     )
+
+def get_first_rain_hour(hourly: list[dict]) -> int | None:
+    """앞으로 12시간 안에 처음 비가 예보된 시각(시). 없으면 None"""
+    for item in hourly[:UMBRELLA_LOOKAHEAD]:
+        pop = item.get("precipitationProbability") or 0
+        if item["condition"] in RAINY_CONDITIONS or pop >= UMBRELLA_POP:
+            return item["hour"]
+    return None
+
+
+def get_outfit(feels_like: float) -> tuple[str, str]:
+    """체감온도에 맞는 옷차림 (코드, 이름)"""
+    for threshold, code, label in OUTFIT_TABLE:
+        if feels_like >= threshold:
+            return code, label
+    return OUTFIT_TABLE[-1][1:]

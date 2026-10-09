@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    LaundryView,
     NotificationScheduleDetailView,
     NotificationScheduleListCreateView,
 )
@@ -19,4 +20,5 @@ urlpatterns = [
         NotificationScheduleDetailView.as_view(),
         name="schedule-detail",
     ),
+    path("laundry/", LaundryView.as_view(), name="laundry"),
 ]
