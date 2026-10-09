@@ -15,6 +15,10 @@ from home.services.kma_client import KmaApiError
 from home.services.weather import get_hourly_weather, get_user_grid
 from .services.laundry import build_laundry_info
 
+from .services.airkorea import get_air_quality
+from .services.running import build_running_info
+
+
 class NotificationScheduleListCreateView(generics.ListCreateAPIView):
     serializer_class = NotificationScheduleSerializer
     permission_classes = [IsAuthenticated]
@@ -57,4 +61,27 @@ class LaundryView(APIView):
             "situation": SituationType.LAUNDRY,
             "region": region,
             **build_laundry_info(hourly, today=kma.now_kst().date()),
+        })
+
+class RunningView(APIView):
+    def get(self, request):
+        grid = get_user_grid(request.user)
+        if grid is None:
+            return Response({"detail": "위치를 먼저 설정해주세요."},
+                            status=status.HTTP_400_BAD_REQUEST)
+        try:
+            hourly = get_hourly_weather(*grid)
+        except KmaApiError as e:
+            return Response({"detail": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
+
+        region = request.user.region
+        return Response({
+            "situation": SituationType.RUNNING,
+            "region": RegionSerializer(region).data if region else None,
+            **build_running_info(
+                hourly,
+                today=kma.now_kst().date(),
+                air=get_air_quality(region),
+                uv=None,  # 생활기상지수 4.0 연동 후 채움
+            ),
         })

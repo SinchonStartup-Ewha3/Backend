@@ -24,6 +24,10 @@ from situations.services.recommendations import (
     will_rain,
 )
 
+from situations.services.airkorea import PM10_LIMITS, grade_of
+from situations.services.running import build_running_info
+
+
 KST = ZoneInfo("Asia/Seoul")
 TODAY = date(2026, 10, 10)
 
@@ -239,3 +243,66 @@ class RecommendationConsistencyTests(SimpleTestCase):
         ]
         hourly[15]["condition"] = "RAIN"
         self.assertFalse(will_rain(hourly))
+
+def make_running_hourly(feels=15, **kwargs):
+    hourly = make_hourly(start_hour=5, **kwargs)
+    for item in hourly:
+        item["feelsLike"] = feels
+    return hourly
+
+
+class RunningLogicTests(SimpleTestCase):
+    def test_good_day_has_morning_and_evening(self):
+        info = build_running_info(make_running_hourly(), today=TODAY)
+        self.assertEqual(info["recommendedTimes"], [
+            {"start": "07:00", "end": "10:00"},
+            {"start": "17:00", "end": "20:00"},
+        ])
+        self.assertIn("최적", info["summary"])
+
+    def test_rain_all_day(self):
+        info = build_running_info(make_running_hourly(condition="RAIN"), today=TODAY)
+        self.assertEqual(info["recommendedTimes"], [])
+        self.assertIn("실내", info["summary"])
+
+    def test_bad_air_blocks_running(self):
+        air = {"grade": "VERY_BAD", "label": "매우나쁨", "pm10": 200, "pm25": 90, "stationName": "중구"}
+        info = build_running_info(make_running_hourly(), today=TODAY, air=air)
+        self.assertEqual(info["recommendedTimes"], [])
+        self.assertIn("미세먼지", info["summary"])
+
+    def test_hot_afternoon_keeps_only_morning(self):
+        hourly = make_running_hourly()
+        for item in hourly:
+            if item["hour"] >= 12:
+                item["feelsLike"] = 31
+        info = build_running_info(hourly, today=TODAY)
+        self.assertEqual(len(info["recommendedTimes"]), 1)
+        self.assertEqual(info["recommendedTimes"][0]["start"], "07:00")
+
+
+class AirGradeTests(SimpleTestCase):
+    def test_pm10_grades(self):
+        self.assertEqual(grade_of(25, PM10_LIMITS), "GOOD")
+        self.assertEqual(grade_of(60, PM10_LIMITS), "NORMAL")
+        self.assertEqual(grade_of(120, PM10_LIMITS), "BAD")
+        self.assertEqual(grade_of(200, PM10_LIMITS), "VERY_BAD")
+
+
+@patch("situations.views.get_air_quality", return_value=None)
+@patch("situations.views.get_hourly_weather")
+class RunningAPITests(APITestCase):
+    def setUp(self):
+        region = Region.objects.create(
+            region_code="1114055000", region_name="서울특별시 중구 소공동",
+            lat="37.563800", lng="126.979500", grid_nx=60, grid_ny=127,
+        )
+        self.user = get_user_model().objects.create_user(nickname="러닝요정", region=region)
+        self.client.force_authenticate(user=self.user)
+
+    def test_running_api(self, mocked_hourly, _):
+        mocked_hourly.return_value = make_running_hourly()
+        response = self.client.get(reverse("situations:running"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["situation"], "RUNNING")
+        self.assertEqual(len(response.data["recommendedTimes"]), 2)
