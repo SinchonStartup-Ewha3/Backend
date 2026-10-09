@@ -28,10 +28,13 @@ from situations.services.airkorea import PM10_LIMITS, grade_of
 from situations.services.running import build_running_info
 from situations.services.uv import summarize_uv, uv_grade
 
+from situations.models import WaterIntake
+from situations.services.hydration import intake_message, recommended_ml
+
 
 KST = ZoneInfo("Asia/Seoul")
 TODAY = date(2026, 10, 10)
-
+FIXED_NOW = datetime(2026, 10, 10, 21, 10, tzinfo=KST)
 
 class LinerNotificationCopyTests(SimpleTestCase):
     """LINER 문구 생성과 fallback 동작을 검증합니다."""
@@ -331,3 +334,65 @@ class UVTests(SimpleTestCase):
                                   uv_forecast=make_uv_forecast(9))
         self.assertEqual(info["uvIndex"]["grade"], "VERY_HIGH")
         self.assertIn("선크림", info["summary"])
+
+class HydrationLogicTests(SimpleTestCase):
+    def test_hot_day_adds_water(self):
+        self.assertEqual(recommended_ml({"maxTemperature": 25}), 1500)
+        self.assertEqual(recommended_ml({"maxTemperature": 31}), 2000)
+        self.assertEqual(recommended_ml(None), 1500)
+
+    def test_very_dry_message(self):
+        message = intake_message({"humidity": 20, "maxTemperature": 22})
+        self.assertIn("매우 건조", message)
+
+
+@patch("home.services.kma_client.now_kst", return_value=FIXED_NOW)
+@patch("situations.views.get_current_weather", return_value={"humidity": 20, "maxTemperature": 22})
+class HydrationAPITests(APITestCase):
+    def setUp(self):
+        region = Region.objects.create(
+            region_code="1114055000", region_name="서울특별시 중구 소공동",
+            lat="37.563800", lng="126.979500", grid_nx=60, grid_ny=127,
+        )
+        self.user = get_user_model().objects.create_user(nickname="수분요정", region=region)
+        self.client.force_authenticate(user=self.user)
+
+    def add(self, time, amount):
+        return self.client.post(reverse("situations:hydration-record-create"),
+                                {"time": time, "amountMl": amount}, format="json")
+
+    def test_empty_day(self, *_):
+        response = self.client.get(reverse("situations:hydration"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["currentMl"], 0)
+        self.assertEqual(len(response.data["hourly"]), 24)
+        self.assertIn("매우 건조", response.data["message"])
+
+    def test_add_records_updates_summary(self, *_):
+        self.add("09:00", 180)
+        response = self.add("21:00", 420)
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["currentMl"], 600)
+        self.assertEqual(response.data["percent"], 40)
+        self.assertEqual(response.data["hourly"][9]["amountMl"], 180)
+
+    def test_only_half_hour_steps(self, *_):
+        self.assertEqual(self.add("09:15", 180).status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_future_time_rejected(self, *_):
+        self.assertEqual(self.add("21:30", 180).status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_cannot_delete_others_record(self, *_):
+        other = get_user_model().objects.create_user(nickname="다른사람")
+        record = WaterIntake.objects.create(user=other, drank_at=FIXED_NOW, amount_ml=100)
+        response = self.client.delete(
+            reverse("situations:hydration-record-delete", args=[record.pk])
+        )
+        self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
+
+    def test_works_without_location(self, *_):
+        self.user.region = None
+        self.user.save()
+        response = self.client.get(reverse("situations:hydration"))
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["humidity"])

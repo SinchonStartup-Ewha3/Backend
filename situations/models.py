@@ -138,3 +138,22 @@ class NotificationLog(models.Model):
 
     def __str__(self):
         return f"{self.user_id} - {self.notification_type} - {self.status}"
+
+class WaterIntake(models.Model):
+    """사용자가 기록한 물 섭취량"""
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="water_intakes",
+    )
+    drank_at = models.DateTimeField()
+    amount_ml = models.PositiveSmallIntegerField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["drank_at", "pk"]
+        indexes = [models.Index(fields=["user", "drank_at"])]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.drank_at:%m/%d %H:%M} {self.amount_ml}ml"
