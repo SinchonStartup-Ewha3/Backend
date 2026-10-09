@@ -59,15 +59,19 @@ class FortuneProfileSerializer(serializers.ModelSerializer):
                 "달력 유형과 생년월일이 필요합니다."
             )
 
+        # 양력은 그대로 사용하고 음력은 양력으로 변환해 저장합니다.
         attrs["converted_solar_date"] = convert_to_solar_date(
             calendar_type=calendar_type,
             birth_date=birth_date,
         )
+
         return attrs
 
     def create(self, validated_data):
+        user = self.context["request"].user
+
         return FortuneProfile.objects.create(
-            user=self.context["request"].user,
+            user=user,
             **validated_data,
         )
 
@@ -95,8 +99,14 @@ class FortunePurchaseCreateSerializer(serializers.Serializer):
     product_id = serializers.IntegerField()
 
     def validate_product_id(self, value):
-        if not FortuneProduct.objects.filter(id=value, is_active=True).exists():
-            raise serializers.ValidationError("판매 중인 상품이 아닙니다.")
+        if not FortuneProduct.objects.filter(
+            id=value,
+            is_active=True,
+        ).exists():
+            raise serializers.ValidationError(
+                "판매 중인 상품이 아닙니다."
+            )
+
         return value
 
     def validate(self, attrs):
@@ -108,6 +118,7 @@ class FortunePurchaseCreateSerializer(serializers.Serializer):
                 "생년월일 정보를 먼저 입력해주세요."
             )
 
+        # 이미 사용 중인 유료 운세 상품이 있으면 중복 구매하지 못하게 합니다.
         if FortunePurchase.objects.filter(
             user=user,
             payment_status=FortunePurchase.PaymentStatus.PAID,
@@ -120,13 +131,17 @@ class FortunePurchaseCreateSerializer(serializers.Serializer):
         return attrs
 
     def create(self, validated_data):
-        profile = self.context["request"].user.fortune_profile
+        user = self.context["request"].user
+        profile = user.fortune_profile
+
         product = FortuneProduct.objects.get(
             id=validated_data["product_id"],
             is_active=True,
         )
+
+        # 프로필이 나중에 수정되어도 구매 당시 계산 기준은 유지합니다.
         return FortunePurchase.objects.create(
-            user=self.context["request"].user,
+            user=user,
             product=product,
             product_title=product.title,
             duration_days=product.duration_days,
@@ -160,11 +175,14 @@ class FortuneResultSerializer(serializers.ModelSerializer):
     detail_locked = serializers.SerializerMethodField()
 
     def _can_view_detail(self):
-        return bool(self.context.get("can_view_detail", False))
+        return bool(
+            self.context.get("can_view_detail", False)
+        )
 
     def get_detail_text(self, obj):
         if not self._can_view_detail():
             return None
+
         return obj.detail_text
 
     def get_detail_locked(self, obj):
