@@ -26,6 +26,7 @@ from situations.services.recommendations import (
 
 from situations.services.airkorea import PM10_LIMITS, grade_of
 from situations.services.running import build_running_info
+from situations.services.uv import summarize_uv, uv_grade
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -288,7 +289,7 @@ class AirGradeTests(SimpleTestCase):
         self.assertEqual(grade_of(120, PM10_LIMITS), "BAD")
         self.assertEqual(grade_of(200, PM10_LIMITS), "VERY_BAD")
 
-
+@patch("situations.views.get_uv_forecast", return_value=None)
 @patch("situations.views.get_air_quality", return_value=None)
 @patch("situations.views.get_hourly_weather")
 class RunningAPITests(APITestCase):
@@ -300,9 +301,33 @@ class RunningAPITests(APITestCase):
         self.user = get_user_model().objects.create_user(nickname="러닝요정", region=region)
         self.client.force_authenticate(user=self.user)
 
-    def test_running_api(self, mocked_hourly, _):
+    def test_running_api(self, mocked_hourly, *_):
         mocked_hourly.return_value = make_running_hourly()
         response = self.client.get(reverse("situations:running"))
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["situation"], "RUNNING")
         self.assertEqual(len(response.data["recommendedTimes"]), 2)
+
+def make_uv_forecast(value):
+    start = datetime(TODAY.year, TODAY.month, TODAY.day, 6, tzinfo=KST)
+    return [{"time": start + timedelta(hours=h), "value": value} for h in range(0, 15, 3)]
+
+
+class UVTests(SimpleTestCase):
+    def test_grades(self):
+        self.assertEqual(uv_grade(2)[0], "LOW")
+        self.assertEqual(uv_grade(5)[0], "NORMAL")
+        self.assertEqual(uv_grade(7)[0], "HIGH")
+        self.assertEqual(uv_grade(9)[0], "VERY_HIGH")
+        self.assertEqual(uv_grade(11)[0], "DANGER")
+
+    def test_summary_uses_daytime_max(self):
+        forecast = make_uv_forecast(3)
+        forecast[2]["value"] = 7  # 12시
+        self.assertEqual(summarize_uv(forecast, TODAY.isoformat())["value"], 7)
+
+    def test_strong_uv_adds_sunscreen_note(self):
+        info = build_running_info(make_running_hourly(), today=TODAY,
+                                  uv_forecast=make_uv_forecast(9))
+        self.assertEqual(info["uvIndex"]["grade"], "VERY_HIGH")
+        self.assertIn("선크림", info["summary"])

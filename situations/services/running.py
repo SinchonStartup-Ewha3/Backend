@@ -1,5 +1,5 @@
 from datetime import date
-
+from .uv import summarize_uv
 from .scoring import best_block, day_word, nearest_day_items
 
 RAIN_CONDITIONS = {"RAIN", "SHOWER", "SLEET", "SNOW"}
@@ -49,12 +49,13 @@ def hour_score(item: dict, air_grade: str | None = None) -> int:
 
 
 def build_running_info(hourly: list[dict], today: date, air: dict | None = None,
-                       uv: dict | None = None) -> dict:
+                       uv_forecast: list[dict] | None = None) -> dict:
     target, items = nearest_day_items(hourly, RUN_START, RUN_END)
     if not items:
         return {"targetDate": None, "score": None, "summary": "러닝 정보를 계산할 예보가 없어요.",
-                "recommendedTimes": [], "uvIndex": uv, "overview": None}
+                "recommendedTimes": [], "uvIndex": None, "overview": None}
 
+    uv = summarize_uv(uv_forecast, target)
     air_grade = air["grade"] if air else None
     scored = [{**item, "score": hour_score(item, air_grade)} for item in items]
 
@@ -88,8 +89,6 @@ def build_running_info(hourly: list[dict], today: date, air: dict | None = None,
         summary = f"{day}은 비 소식은 없지만 습도가 조금 높아요. 추천 시간대에 수분을 챙기며 달려보세요."
     elif blocks:
         summary = f"{day}은 추천 시간대에 맞춰 가볍게 달려보세요."
-    elif blocks:
-        summary = f"{day}은 추천 시간대에 맞춰 가볍게 달려보세요."
     elif air_grade in ("BAD", "VERY_BAD"):
         summary = f"{day}은 미세먼지가 나빠 야외 러닝보다 실내 운동을 추천해요."
     elif any_rain:
@@ -100,6 +99,8 @@ def build_running_info(hourly: list[dict], today: date, air: dict | None = None,
         summary = f"{day}은 많이 추워요. 충분히 몸을 풀고 짧게 달리거나 실내 운동을 추천해요."
     else:
         summary = f"{day}은 러닝하기 좋은 시간대가 없어요. 실내 운동을 추천해요."
+    if blocks and uv and uv["grade"] in ("VERY_HIGH", "DANGER"):
+        summary += " 자외선이 강하니 선크림을 꼭 바르세요."
 
     return {
         "targetDate": target,

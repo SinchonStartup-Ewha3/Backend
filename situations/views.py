@@ -17,7 +17,7 @@ from .services.laundry import build_laundry_info
 
 from .services.airkorea import get_air_quality
 from .services.running import build_running_info
-
+from .services.uv import get_uv_forecast
 
 class NotificationScheduleListCreateView(generics.ListCreateAPIView):
     serializer_class = NotificationScheduleSerializer
@@ -82,6 +82,6 @@ class RunningView(APIView):
                 hourly,
                 today=kma.now_kst().date(),
                 air=get_air_quality(region),
-                uv=None,  # 생활기상지수 4.0 연동 후 채움
+                uv_forecast=get_uv_forecast(region),
             ),
         })
