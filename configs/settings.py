@@ -26,14 +26,57 @@ env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, []),
 )
-if (BASE_DIR / '.env.prod').exists():
-    environ.Env.read_env(BASE_DIR / '.env.prod')
-else:
-    environ.Env.read_env(BASE_DIR / '.env.dev')
+
+
+# 로컬 개발에서는 .env.dev를 우선 사용합니다.
+# 배포 서버에 .env.dev가 없으면 .env.prod를 사용합니다.
+if (BASE_DIR / ".env.dev").exists():
+    environ.Env.read_env(BASE_DIR / ".env.dev")
+elif (BASE_DIR / ".env.prod").exists():
+    environ.Env.read_env(BASE_DIR / ".env.prod")
+
+# 프론트엔드 알림 클릭 시 이동할 기본 주소
+FRONTEND_BASE_URL = env(
+    "FRONTEND_BASE_URL",
+    default="https://weether.kr",
+)
+
+# 스케줄러를 5분마다 실행할 예정이므로 발송 허용 구간도 5분으로 설정합니다.
+WEATHER_NOTIFICATION_WINDOW_MINUTES = env.int(
+    "WEATHER_NOTIFICATION_WINDOW_MINUTES",
+    default=5,
+)
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY')
 KMA_SERVICE_KEY = env("KMA_SERVICE_KEY", default="")
+
+KMA_BASE_URL = env(
+    "KMA_BASE_URL",
+    default="https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0",
+)
+
+
+ONESIGNAL_APP_ID = env("ONESIGNAL_APP_ID", default="")
+ONESIGNAL_REST_API_KEY = env("ONESIGNAL_REST_API_KEY", default="")
+ONESIGNAL_API_URL = env(
+    "ONESIGNAL_API_URL",
+    default="https://api.onesignal.com/notifications",
+)
+ONESIGNAL_DRY_RUN = env.bool("ONESIGNAL_DRY_RUN", default=True)
+
+# LINER AI 추천 문구 생성 설정
+LINER_API_KEY = env("LINER_API_KEY", default="")
+LINER_API_URL = env(
+    "LINER_API_URL",
+    default="https://platform.liner.com/api/v1/responses",
+)
+LINER_MODEL = env("LINER_MODEL", default="liner-mark")
+LINER_ENABLED = env.bool("LINER_ENABLED", default=False)
+LINER_TIMEOUT_SECONDS = env.int(
+    "LINER_TIMEOUT_SECONDS",
+    default=10,
+)
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
@@ -166,28 +209,20 @@ MAILERS = {
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
-AWS_STORAGE_BUCKET_NAME = env('AWS_STORAGE_BUCKET_NAME', default='')
-if AWS_STORAGE_BUCKET_NAME:
-    INSTALLED_APPS += ['storages']
-    AWS_S3_REGION_NAME = env('AWS_S3_REGION_NAME', default='ap-northeast-2')
-    AWS_S3_CUSTOM_DOMAIN = env('AWS_S3_CUSTOM_DOMAIN')
-    AWS_DEFAULT_ACL = None
-    AWS_QUERYSTRING_AUTH = False
-    AWS_S3_FILE_OVERWRITE = False
-    STORAGES = {
-        'default': {
-            'BACKEND': 'storages.backends.s3.S3Storage',
-            'OPTIONS': {
-                'bucket_name': AWS_STORAGE_BUCKET_NAME,
-                'region_name': AWS_S3_REGION_NAME,
-                'custom_domain': AWS_S3_CUSTOM_DOMAIN,
-                'file_overwrite': False,
-                'querystring_auth': False,
-            },
-        },
-        'staticfiles': {
-            'BACKEND': 'whitenoise.storage.CompressedManifestStaticFilesStorage',
-        },
-    }
-
-CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
+# 사용자 성향별 알림 발송 시간
+LAUNDRY_NOTIFICATION_HOUR = env.int(
+    "LAUNDRY_NOTIFICATION_HOUR",
+    default=7,
+)
+EXERCISE_MORNING_NOTIFICATION_HOUR = env.int(
+    "EXERCISE_MORNING_NOTIFICATION_HOUR",
+    default=6,
+)
+EXERCISE_EVENING_NOTIFICATION_HOUR = env.int(
+    "EXERCISE_EVENING_NOTIFICATION_HOUR",
+    default=17,
+)
+EXERCISE_GOOD_WEATHER_NOTIFICATION_HOUR = env.int(
+    "EXERCISE_GOOD_WEATHER_NOTIFICATION_HOUR",
+    default=9,
+)
