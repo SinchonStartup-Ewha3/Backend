@@ -26,10 +26,12 @@ env = environ.Env(
     DEBUG=(bool, False),
     ALLOWED_HOSTS=(list, []),
 )
-if (BASE_DIR / '.env.prod').exists():
-    environ.Env.read_env(BASE_DIR / '.env.prod')
-else:
-    environ.Env.read_env(BASE_DIR / '.env.dev')
+# 로컬에서는 .env.dev를 우선 사용하고,
+# 배포 환경에 .env.dev가 없을 때 .env.prod를 사용합니다.
+if (BASE_DIR / ".env.dev").exists():
+    environ.Env.read_env(BASE_DIR / ".env.dev")
+elif (BASE_DIR / ".env.prod").exists():
+    environ.Env.read_env(BASE_DIR / ".env.prod")
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY')

@@ -45,7 +45,7 @@ class PostListCreateView(generics.ListCreateAPIView):
         return queryset.filter(tag=tag)
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        serializer.save()
 
 
 class PostUpdateView(generics.UpdateAPIView):
