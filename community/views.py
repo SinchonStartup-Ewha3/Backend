@@ -12,6 +12,14 @@ from .pagination import PostPagination
 from .permissions import IsPostAuthorOrReadOnly
 from .serializers import PostSerializer
 
+from core.serializers import RegionSerializer
+from home.services.kma_client import KmaApiError
+
+from .services.weather_copy import (
+    CommunityLocationRequired,
+    build_community_weather_copy,
+)
+
 
 class PostListCreateView(generics.ListCreateAPIView):
     """태그별 피드 조회와 게시물 작성을 담당한다."""
@@ -80,4 +88,51 @@ class PostLikeToggleView(APIView):
             "postId": post.pk,
             "isLiked": is_liked,
             "likeCount": post.likes.count(),
+        })
+
+class CommunityWeatherCopyView(APIView):
+    """커뮤니티 화면 상단·하단 날씨 문구를 반환합니다."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        try:
+            region, copy_data = (
+                build_community_weather_copy(
+                    request.user,
+                )
+            )
+
+        except CommunityLocationRequired:
+            return Response(
+                {
+                    "detail": "지역을 먼저 설정해주세요.",
+                    "code": "COMMUNITY_LOCATION_REQUIRED",
+                },
+                status=400,
+            )
+
+        except KmaApiError as exc:
+            return Response(
+                {
+                    "detail": str(exc),
+                    "code": "WEATHER_API_ERROR",
+                },
+                status=502,
+            )
+
+        region_data = dict(
+            RegionSerializer(region).data
+        )
+
+        parts = region.region_name.split()
+        region_data["displayName"] = (
+            " ".join(parts[:2])
+            if len(parts) >= 2
+            else region.region_name
+        )
+
+        return Response({
+            "region": region_data,
+            **copy_data,
         })
