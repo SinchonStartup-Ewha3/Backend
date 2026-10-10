@@ -14,6 +14,14 @@ class Post(models.Model):
         related_name="community_posts",
     )
 
+    region = models.ForeignKey(
+        "core.Region",
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
+        related_name="community_posts",
+    )
+
    
     content = models.CharField(max_length=200)
 
