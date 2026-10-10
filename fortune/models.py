@@ -104,9 +104,12 @@ class FortunePurchase(models.Model):
         CANCELED = "CANCELED", "결제 취소"
         REFUNDED = "REFUNDED", "환불"
 
+    # 탈퇴해도 결제 기록은 환불·정산을 위해 남기고 사용자 연결만 끊는다
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,
-        on_delete=models.PROTECT,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
         related_name="fortune_purchases",
     )
     product = models.ForeignKey(

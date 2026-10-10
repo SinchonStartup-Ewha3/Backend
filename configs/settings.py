@@ -49,6 +49,8 @@ WEATHER_NOTIFICATION_WINDOW_MINUTES = env.int(
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = env('SECRET_KEY')
 KMA_SERVICE_KEY = env("KMA_SERVICE_KEY", default="")
+# 회원 탈퇴 시 카카오 연결 끊기에 사용 (카카오 디벨로퍼스 > 앱 키 > Admin 키)
+KAKAO_ADMIN_KEY = env("KAKAO_ADMIN_KEY", default="")
 
 KMA_BASE_URL = env(
     "KMA_BASE_URL",
