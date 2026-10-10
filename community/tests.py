@@ -9,6 +9,8 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from core.models import Region
+
 from .models import Post, PostLike
 
 
@@ -27,12 +29,23 @@ class PostAPITests(APITestCase):
         )
 
     def setUp(self):
+        self.region = Region.objects.create(
+            region_code="1114055000",
+            region_name="서울특별시 중구 소공동",
+            lat="37.563800",
+            lng="126.979500",
+            grid_nx=60,
+            grid_ny=127,
+        )
+
         self.author = User.objects.create_user(
             nickname="작성자",
+            region=self.region,
         )
 
         self.other_user = User.objects.create_user(
             nickname="다른사용자",
+            region=self.region,
         )
 
         self.create_url = reverse(
@@ -102,6 +115,11 @@ class PostAPITests(APITestCase):
         self.assertEqual(
             post.tag,
             "padded",
+        )
+
+        self.assertEqual(
+            post.region,
+            self.region,
         )
 
         self.assertFalse(bool(post.image))
