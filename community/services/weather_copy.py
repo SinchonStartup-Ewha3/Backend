@@ -130,7 +130,9 @@ def _fallback_copy(
 
     feels_like = current_weather.get("feelsLike")
     if feels_like is None:
-        feels_like = current_weather.get("temperature", 15)
+        feels_like = current_weather.get("temperature")
+    if feels_like is None:
+        feels_like = 15
 
     humidity = current_weather.get("humidity")
     condition = current_weather.get("condition")
