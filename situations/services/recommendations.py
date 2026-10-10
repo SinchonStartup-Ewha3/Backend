@@ -1,5 +1,5 @@
 from premium.models import PremiumProfile
-
+from home.services.life_info import get_first_rain_hour, get_outfit
 
 PRECIPITATION_CONDITIONS = {
     "RAIN",
@@ -28,56 +28,36 @@ def personalized_temperature(
 
     return temperature
 
+# 옷차림 구간은 홈(life_info.py)과 같은 기준을 쓰고, 알림 문장만 여기서 정합니다.
+OUTFIT_MESSAGES = {
+    "SLEEVELESS": "민소매나 반팔, 반바지처럼 시원한 옷이 좋아요.",
+    "SHORT_SLEEVE": "반팔이나 얇은 셔츠가 적당해요.",
+    "LIGHT_LAYER": "얇은 긴팔이나 가벼운 셔츠를 추천해요.",
+    "KNIT": "니트나 맨투맨처럼 도톰한 옷이 좋아요.",
+    "CARDIGAN": "가디건이나 재킷을 챙겨주세요.",
+    "TRENCH": "트렌치코트나 도톰한 재킷을 추천해요.",
+    "COAT": "코트나 따뜻한 니트를 입어주세요.",
+    "PADDED": "패딩과 목도리처럼 보온성이 높은 옷을 챙겨주세요.",
+}
 
 def recommend_outfit(
     temperature: float,
     cold_sensitivity: str,
 ) -> str:
-    """보정된 체감온도에 맞는 기본 옷차림을 반환합니다."""
+    """보정된 체감온도에 홈과 같은 옷차림 기준을 적용합니다."""
 
     adjusted = personalized_temperature(
         temperature,
         cold_sensitivity,
     )
-
-    if adjusted >= 28:
-        return "민소매나 반팔, 반바지처럼 시원한 옷이 좋아요."
-
-    if adjusted >= 23:
-        return "반팔이나 얇은 셔츠가 적당해요."
-
-    if adjusted >= 20:
-        return "얇은 긴팔이나 가벼운 셔츠를 추천해요."
-
-    if adjusted >= 17:
-        return "가디건이나 얇은 재킷을 챙겨주세요."
-
-    if adjusted >= 12:
-        return "니트나 재킷처럼 따뜻한 겉옷이 좋아요."
-
-    if adjusted >= 9:
-        return "트렌치코트나 도톰한 재킷을 추천해요."
-
-    if adjusted >= 5:
-        return "코트나 따뜻한 니트를 입어주세요."
-
-    return "패딩과 목도리처럼 보온성이 높은 옷을 챙겨주세요."
+    code, _ = get_outfit(adjusted)
+    return OUTFIT_MESSAGES[code]
 
 
 def will_rain(hourly_weather: list[dict]) -> bool:
-    """시간별 예보에 비·눈 또는 높은 강수확률이 있는지 확인합니다."""
+    """홈과 같은 기준(앞으로 12시간, 강수확률 60% 이상)으로 비 예보를 확인합니다."""
 
-    for weather in hourly_weather:
-        condition = weather.get("condition")
-        probability = weather.get("precipitationProbability") or 0
-
-        if condition in PRECIPITATION_CONDITIONS:
-            return True
-
-        if probability >= 60:
-            return True
-
-    return False
+    return get_first_rain_hour(hourly_weather) is not None
 
 
 def is_good_exercise_weather(

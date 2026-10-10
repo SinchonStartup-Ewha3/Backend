@@ -55,3 +55,19 @@ class NotificationScheduleSerializer(serializers.ModelSerializer):
 
         
         return sorted(values)
+    
+class WaterIntakeCreateSerializer(serializers.Serializer):
+    time = serializers.TimeField(input_formats=["%H:%M"])
+    amountMl = serializers.IntegerField(
+        min_value=10,
+        max_value=1000,
+        error_messages={
+            "min_value": "10ml 이상 입력해주세요.",
+            "max_value": "한 번에 1000ml까지 기록할 수 있어요.",
+        },
+    )
+
+    def validate_time(self, value):
+        if value.minute not in (0, 30):
+            raise serializers.ValidationError("30분 단위로 입력해주세요.")
+        return value
