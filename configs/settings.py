@@ -27,7 +27,6 @@ env = environ.Env(
     ALLOWED_HOSTS=(list, []),
 )
 
-
 # 로컬 개발에서는 .env.dev를 우선 사용합니다.
 # 배포 서버에 .env.dev가 없으면 .env.prod를 사용합니다.
 if (BASE_DIR / ".env.dev").exists():

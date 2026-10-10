@@ -33,6 +33,10 @@ class NotificationScheduleSerializer(serializers.ModelSerializer):
     weekdays = serializers.ListField(
         child=serializers.IntegerField(min_value=0, max_value=6),
         allow_empty=False,
+        help_text=(
+            "요일 번호: 0=월요일, 1=화요일, 2=수요일, "
+            "3=목요일, 4=금요일, 5=토요일, 6=일요일"
+        ),
     )
 
     class Meta:

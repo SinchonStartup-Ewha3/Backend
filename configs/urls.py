@@ -38,6 +38,8 @@ urlpatterns = [
     path("api/home/", include("home.urls")),
     path("api/premium/", include("premium.urls")),
     path("api/situations/", include("situations.urls")),
+    path("api/fortune/", include("fortune.urls")),
+    path("api/mypage/", include("mypage.urls")),
 ]
 
 if settings.DEBUG:

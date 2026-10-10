@@ -30,7 +30,7 @@ class PostListCreateView(generics.ListCreateAPIView):
     parser_classes = [MultiPartParser, FormParser, JSONParser]
 
     def get_queryset(self):
-        queryset = Post.objects.annotate(
+        queryset = Post.objects.select_related("region").annotate(
             like_count=Count("likes", distinct=True),
             is_liked=Exists(
                 PostLike.objects.filter(
@@ -53,7 +53,7 @@ class PostListCreateView(generics.ListCreateAPIView):
         return queryset.filter(tag=tag)
 
     def perform_create(self, serializer):
-        serializer.save(user=self.request.user)
+        serializer.save()
 
 
 class PostUpdateView(generics.UpdateAPIView):

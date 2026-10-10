@@ -1,11 +1,43 @@
 from django.utils import timezone
 from rest_framework import serializers
 
+from core.geo import find_nearest_region
+from core.serializers import RegionSerializer
+
 from .models import Post
 
 
 class PostSerializer(serializers.ModelSerializer):
     postId = serializers.IntegerField(source="pk", read_only=True)
+
+   
+    locationMode = serializers.ChoiceField(
+        choices=[
+            ("SAVED", "저장된 지역"),
+            ("CURRENT", "현재 위치"),
+        ],
+        write_only=True,
+        required=False,
+        default="SAVED",
+    )
+
+
+    lat = serializers.FloatField(
+        write_only=True,
+        required=False,
+        min_value=-90,
+        max_value=90,
+    )
+
+    lng = serializers.FloatField(
+        write_only=True,
+        required=False,
+        min_value=-180,
+        max_value=180,
+    )
+
+
+    region = RegionSerializer(read_only=True)
 
     tag = serializers.ChoiceField(
         choices=Post.Tag.choices,
@@ -45,6 +77,10 @@ class PostSerializer(serializers.ModelSerializer):
             "tagLabel",
             "image",
             "imageUrl",
+            "region",
+            "locationMode",
+            "lat",
+            "lng",
             "createdAt",
             "createdAtDisplay",
             "modifiedAt",
@@ -55,6 +91,7 @@ class PostSerializer(serializers.ModelSerializer):
             "postId",
             "tagLabel",
             "imageUrl",
+            "region",
             "createdAt",
             "createdAtDisplay",
             "modifiedAt",
@@ -136,3 +173,70 @@ class PostSerializer(serializers.ModelSerializer):
             )
 
         return image
+
+    def validate(self, attrs):
+        """
+        현재 위치를 선택한 신규 게시글에는
+        위도와 경도가 모두 필요합니다.
+        """
+
+        attrs = super().validate(attrs)
+
+        if self.instance is not None:
+            return attrs
+
+        location_mode = attrs.get("locationMode", "SAVED")
+
+        if location_mode == "CURRENT":
+            if attrs.get("lat") is None or attrs.get("lng") is None:
+                raise serializers.ValidationError({
+                    "location": "현재 위치를 사용하려면 위도와 경도가 필요합니다."
+                })
+
+        return attrs
+
+
+    def create(self, validated_data):
+        """작성 요청의 위치 방식에 따라 게시글 지역을 결정합니다."""
+
+        request = self.context["request"]
+        user = request.user
+
+        location_mode = validated_data.pop("locationMode", "SAVED")
+        lat = validated_data.pop("lat", None)
+        lng = validated_data.pop("lng", None)
+
+        if location_mode == "CURRENT":
+            region = find_nearest_region(lat, lng)
+
+            if region is None:
+                raise serializers.ValidationError({
+                    "location": "지원하는 국내 지역의 위치를 확인할 수 없습니다."
+                })
+
+        else:
+            region = user.region
+
+            if region is None:
+                raise serializers.ValidationError({
+                    "region": "저장된 지역이 없습니다. 지역을 먼저 설정해주세요."
+                })
+
+        return Post.objects.create(
+            user=user,
+            region=region,
+            **validated_data,
+        )
+
+
+    def update(self, instance, validated_data):
+        """
+        게시글 수정으로 작성 당시 지역을 바꿀 수 없도록
+        위치 관련 입력값을 제거합니다.
+        """
+
+        validated_data.pop("locationMode", None)
+        validated_data.pop("lat", None)
+        validated_data.pop("lng", None)
+
+        return super().update(instance, validated_data)
