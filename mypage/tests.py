@@ -6,6 +6,7 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
+from core.models import Region
 from fortune.models import (
     FortuneProduct,
     FortuneProfile,
@@ -121,3 +122,60 @@ class MyPageFortuneProfileAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_404_NOT_FOUND)
         self.assertEqual(response.data["code"], "FORTUNE_PROFILE_NOT_FOUND")
+
+
+class MyPageSummaryAPITests(APITestCase):
+    def setUp(self):
+        self.region = Region.objects.create(
+            region_code="1141058500",
+            region_name="서울특별시 서대문구 신촌동",
+            lat="37.556000",
+            lng="126.936000",
+            grid_nx=59,
+            grid_ny=126,
+        )
+        self.user = get_user_model().objects.create_user(
+            nickname="마이페이지사용자",
+            region=self.region,
+        )
+
+    def test_login_is_required(self):
+        response = self.client.get(
+            reverse("mypage-summary")
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_summary_contains_profile_and_notifications(self):
+        self.client.force_authenticate(self.user)
+
+        response = self.client.get(
+            reverse("mypage-summary")
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(
+            response.data["profile"]["nickname"],
+            self.user.nickname,
+        )
+        self.assertEqual(
+            response.data["profile"]["region"]["regionCode"],
+            self.region.region_code,
+        )
+        self.assertIsNone(response.data["subscription"])
+        self.assertEqual(
+            response.data["notificationSettings"],
+            {
+                "outer": False,
+                "exercise": False,
+                "laundry": False,
+                "umbrella": False,
+            },
+        )
+        self.assertNotIn("activity", response.data)

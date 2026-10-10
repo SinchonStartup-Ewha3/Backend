@@ -48,14 +48,66 @@ class PostListCreateView(generics.ListCreateAPIView):
         serializer.save()
 
 
-class PostUpdateView(generics.UpdateAPIView):
-    """별도 상세 조회 없이 작성자에게 게시물 수정만 제공한다."""
+def _activity_post_queryset(user):
+    """마이페이지 게시물 목록에 필요한 공감 정보를 함께 조회한다."""
 
-    queryset = Post.objects.select_related("user").all()
+    return (
+        Post.objects
+        .select_related("region")
+        .annotate(
+            like_count=Count("likes", distinct=True),
+            is_liked=Exists(
+                PostLike.objects.filter(
+                    post_id=OuterRef("pk"),
+                    user=user,
+                )
+            ),
+        )
+        .order_by("-created_at", "-pk")
+    )
+
+
+class MyPostListView(generics.ListAPIView):
+    """현재 사용자가 작성한 게시물 목록을 반환한다."""
+
+    serializer_class = PostSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = PostPagination
+
+    def get_queryset(self):
+        return _activity_post_queryset(
+            self.request.user,
+        ).filter(user=self.request.user)
+
+
+class LikedPostListView(generics.ListAPIView):
+    """현재 사용자가 공감한 게시물 목록을 반환한다."""
+
+    serializer_class = PostSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = PostPagination
+
+    def get_queryset(self):
+        return _activity_post_queryset(
+            self.request.user,
+        ).filter(
+            likes__user=self.request.user,
+        ).distinct()
+
+
+class PostUpdateView(generics.RetrieveUpdateDestroyAPIView):
+    """작성자 본인에게만 게시물 상세 조회·수정·삭제를 제공한다."""
+
     serializer_class = PostSerializer
     permission_classes = [IsAuthenticated, IsPostAuthorOrReadOnly]
     parser_classes = [MultiPartParser, FormParser, JSONParser]
     lookup_url_kwarg = "post_id"
+
+    def get_queryset(self):
+        return Post.objects.select_related(
+            "user",
+            "region",
+        ).filter(user=self.request.user)
 
 
 class PostLikeToggleView(APIView):
