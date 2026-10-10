@@ -128,10 +128,31 @@ def get_hourly_weather(nx: int, ny: int, hours: int = 24, now: datetime | None =
             continue
         values = forecast[dt]
         condition = to_condition(values.get("SKY"), values.get("PTY"))
+
+        # 시간별 예보의 기온·습도·풍속을 숫자로 변환합니다.
+        temperature = _to_float(values.get("TMP"))
+        humidity = _to_float(values.get("REH"))
+        wind_speed = _to_float(values.get("WSD"))
+
+        # 해당 예보 시각을 기준으로 체감온도를 계산합니다.
+        apparent_temperature = (
+            feels_like(
+                temperature,
+                humidity,
+                wind_speed,
+                dt.month,
+            )
+            if temperature is not None
+            else None
+        )
+
         result.append({
             "time": dt.isoformat(),
             "hour": dt.hour,
-            "temperature": _to_float(values.get("TMP")),
+            "temperature": temperature,
+            "feelsLike": apparent_temperature,
+            "humidity": humidity,
+            "windSpeed": wind_speed,
             "condition": condition.value,
             "conditionLabel": condition.label,
             "precipitationProbability": _to_float(values.get("POP")),
@@ -140,3 +161,14 @@ def get_hourly_weather(nx: int, ny: int, hours: int = 24, now: datetime | None =
         if len(result) >= hours:
             break
     return result
+
+def get_user_grid(user) -> tuple[int, int] | None:
+    """GPS 사용자는 실제 좌표, 직접 선택한 사용자는 지역 중심 좌표로 격자를 구한다"""
+    from accounts.models import User
+    from core.geo import latlng_to_grid
+
+    if user.location_mode == User.LocationMode.GPS and user.last_lat is not None:
+        return latlng_to_grid(user.last_lat, user.last_lng)
+    if user.region is not None:
+        return user.region.grid_nx, user.region.grid_ny
+    return None

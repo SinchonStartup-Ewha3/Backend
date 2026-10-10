@@ -7,7 +7,8 @@ from django.core.cache import cache
 from urllib.parse import unquote 
 
 KST = ZoneInfo("Asia/Seoul")
-BASE_URL = "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0"
+# 환경별로 엔드포인트를 바꿀 수 있도록 settings에서 읽는다.
+BASE_URL = settings.KMA_BASE_URL.rstrip("/")
 VILAGE_BASE_HOURS = (2, 5, 8, 11, 14, 17, 20, 23)
 CACHE_TIMEOUT = 60 * 60 * 3  # 3시간
 

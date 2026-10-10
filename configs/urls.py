@@ -36,6 +36,8 @@ urlpatterns = [
     path("api/regions/", include("core.urls")),
     path("api/community/", include("community.urls")),
     path("api/home/", include("home.urls")),
+    path("api/premium/", include("premium.urls")),
+    path("api/situations/", include("situations.urls")),
 ]
 
 if settings.DEBUG:
