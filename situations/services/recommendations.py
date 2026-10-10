@@ -131,7 +131,7 @@ def build_exercise_message(
 
     if (
         profile.exercise_preference
-        == PremiumProfile.ExercisePreference.NO_NOTIFICATION
+        == PremiumProfile.ExercisePreference.RARELY
     ):
         return None
 

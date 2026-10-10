@@ -20,12 +20,17 @@ class PremiumProfileView(APIView):
         return Response(PremiumProfileSerializer(profile).data)
 
     def put(self, request):
-        profile = self.get_profile(request.user)
+        return self.update_profile(request)
 
-    
+    def patch(self, request):
+        return self.update_profile(request, partial=True)
+
+    def update_profile(self, request, partial=False):
+        profile = self.get_profile(request.user)
         serializer = PremiumProfileSerializer(
             profile,
             data=request.data,
+            partial=partial,
         )
         serializer.is_valid(raise_exception=True)
         serializer.save()

@@ -33,7 +33,7 @@ class MyPageSummaryView(APIView):
             "exercise": (
                 premium_profile is not None
                 and premium_profile.exercise_preference
-                != PremiumProfile.ExercisePreference.NO_NOTIFICATION
+                != PremiumProfile.ExercisePreference.RARELY
             ),
             "laundry": (
                 premium_profile is not None

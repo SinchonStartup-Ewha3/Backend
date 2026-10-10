@@ -15,7 +15,7 @@ class PremiumProfile(models.Model):
         MORNING = "MORNING", "아침에 자주 해요"
         EVENING = "EVENING", "저녁에 자주 해요"
         GOOD_WEATHER_ONLY = "GOOD_WEATHER_ONLY", "날씨가 좋을 때만 해요"
-        NO_NOTIFICATION = "NO_NOTIFICATION", "운동 알림은 필요 없어요"
+        RARELY = "RARELY", "운동을 자주 하지 않아요"
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -32,10 +32,9 @@ class PremiumProfile(models.Model):
     exercise_preference = models.CharField(
         max_length=30,
         choices=ExercisePreference.choices,
-        default=ExercisePreference.NO_NOTIFICATION,
+        default=ExercisePreference.RARELY,
     )
 
-    
     laundry_rain_alert = models.BooleanField(default=False)
     laundry_humidity_alert = models.BooleanField(default=False)
     laundry_indoor_tip = models.BooleanField(default=False)
