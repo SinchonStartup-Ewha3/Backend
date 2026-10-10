@@ -1,7 +1,12 @@
 from django.urls import path
 
 from .views import PostLikeToggleView, PostListCreateView, PostUpdateView
-
+from .views import (
+    CommunityWeatherCopyView,
+    PostLikeToggleView,
+    PostListCreateView,
+    PostUpdateView,
+)
 
 app_name = "community"
 
@@ -12,5 +17,9 @@ urlpatterns = [
         "posts/<int:post_id>/like/",
         PostLikeToggleView.as_view(),
         name="post-like-toggle",
+    ),path(
+        "weather-copy/",
+        CommunityWeatherCopyView.as_view(),
+        name="weather-copy",
     ),
 ]

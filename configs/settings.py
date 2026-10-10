@@ -78,6 +78,39 @@ LINER_TIMEOUT_SECONDS = env.int(
     default=10,
 )
 
+# 커뮤니티 날씨 문구 생성에 사용할 LINER 모델
+# 운영 중 문구 스타일이 갑자기 바뀌지 않도록 버전을 고정합니다.
+LINER_COMMUNITY_MODEL = env(
+    "LINER_COMMUNITY_MODEL",
+    default="liner-mark-1.3",
+)
+
+# 같은 지역의 문구를 매 요청마다 새로 생성하지 않고 캐시합니다.
+COMMUNITY_WEATHER_COPY_CACHE_SECONDS = env.int(
+    "COMMUNITY_WEATHER_COPY_CACHE_SECONDS",
+    default=600,
+)
+
+# 커뮤니티 문구에 반영할 최근 게시글 범위
+COMMUNITY_COPY_RECENT_HOURS = env.int(
+    "COMMUNITY_COPY_RECENT_HOURS",
+    default=3,
+)
+
+# 게시글 기반 문구를 생성하기 위한 최소 게시글 수
+COMMUNITY_COPY_MIN_POSTS = env.int(
+    "COMMUNITY_COPY_MIN_POSTS",
+    default=3,
+)
+
+# 가장 많은 태그가 전체 게시글의 60% 이상일 때 일관된 의견으로 판단
+COMMUNITY_COPY_CONSISTENCY_RATIO = env.float(
+    "COMMUNITY_COPY_CONSISTENCY_RATIO",
+    default=0.6,
+)
+
+
+
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = env('DEBUG')
 
