@@ -68,6 +68,7 @@ class NotificationLog(models.Model):
 
     class NotificationType(models.TextChoices):
         OUTING_WEATHER = "OUTING_WEATHER", "외출 날씨"
+        OUTERWEAR = "OUTERWEAR", "겉옷"
         EXERCISE = "EXERCISE", "운동"
         LAUNDRY = "LAUNDRY", "빨래"
         FORTUNE = "FORTUNE", "운세"

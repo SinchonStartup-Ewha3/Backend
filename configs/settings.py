@@ -209,6 +209,10 @@ MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
 # 사용자 성향별 알림 발송 시간
+OUTERWEAR_NOTIFICATION_HOUR = env.int(
+    "OUTERWEAR_NOTIFICATION_HOUR",
+    default=7,
+)
 LAUNDRY_NOTIFICATION_HOUR = env.int(
     "LAUNDRY_NOTIFICATION_HOUR",
     default=7,

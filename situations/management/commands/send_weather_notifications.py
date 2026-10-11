@@ -35,12 +35,14 @@ class Command(BaseCommand):
             f"확인={outing_result['checked']}, "
             f"발송시각 도달={outing_result['due']}, "
             f"처리={outing_result['processed']}, "
+            f"제외={outing_result['skipped']}, "
             f"오류={outing_result['errors']}"
         )
 
         self.stdout.write(
-            "운동·빨래 알림 결과: "
+            "겉옷·운동·빨래 알림 결과: "
             f"확인={preference_result['checked']}, "
+            f"겉옷 처리={preference_result['outerwear_processed']}, "
             f"운동 처리={preference_result['exercise_processed']}, "
             f"빨래 처리={preference_result['laundry_processed']}, "
             f"조건 제외={preference_result['skipped']}, "

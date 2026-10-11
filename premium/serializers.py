@@ -9,13 +9,13 @@ class PremiumProfileSerializer(serializers.ModelSerializer):
         RAIN_BEFORE = "RAIN_BEFORE"
         HIGH_HUMIDITY = "HIGH_HUMIDITY"
         INDOOR_DRYING_TIP = "INDOOR_DRYING_TIP"
-        NONE = "NONE"
+        DAILY_SUMMARY = "DAILY_SUMMARY"
 
         CHOICES = [
             (RAIN_BEFORE, "비 오기 전에 알려주세요"),
             (HIGH_HUMIDITY, "습도가 높을 때 알려주세요"),
             (INDOOR_DRYING_TIP, "실내 건조 팁도 받고 싶어요"),
-            (NONE, "선호하는 빨래 조건이 없어요"),
+            (DAILY_SUMMARY, "매일 빨래 날씨를 알려주세요"),
         ]
 
     coldSensitivity = serializers.ChoiceField(
@@ -59,9 +59,9 @@ class PremiumProfileSerializer(serializers.ModelSerializer):
         if len(values) != len(set(values)):
             raise serializers.ValidationError("같은 항목을 중복 선택할 수 없습니다.")
 
-        if self.LaundryPreference.NONE in values and len(values) > 1:
+        if self.LaundryPreference.DAILY_SUMMARY in values and len(values) > 1:
             raise serializers.ValidationError(
-                "'선호하는 빨래 조건이 없어요'는 다른 항목과 함께 선택할 수 없습니다."
+                "'매일 빨래 날씨를 알려주세요'는 다른 항목과 함께 선택할 수 없습니다."
             )
 
         return values
@@ -110,7 +110,7 @@ class PremiumProfileSerializer(serializers.ModelSerializer):
             preferences.append(self.LaundryPreference.INDOOR_DRYING_TIP)
 
         if not preferences:
-            preferences.append(self.LaundryPreference.NONE)
+            preferences.append(self.LaundryPreference.DAILY_SUMMARY)
 
         data["laundryPreferences"] = preferences
         return data

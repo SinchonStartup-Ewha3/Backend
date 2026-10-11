@@ -28,7 +28,10 @@ class PremiumProfileAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["coldSensitivity"], "UNKNOWN")
         self.assertEqual(response.data["exercisePreference"], "FLEXIBLE")
-        self.assertEqual(response.data["laundryPreferences"], ["NONE"])
+        self.assertEqual(
+            response.data["laundryPreferences"],
+            ["DAILY_SUMMARY"],
+        )
         self.assertFalse(response.data["isCompleted"])
         self.assertIsNone(response.data["surveyCompletedAt"])
         self.assertTrue(PremiumProfile.objects.filter(user=self.user).exists())
@@ -86,13 +89,13 @@ class PremiumProfileAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("laundryPreferences", response.data)
 
-    def test_none_laundry_preference_must_be_selected_alone(self):
+    def test_daily_summary_laundry_preference_must_be_selected_alone(self):
         response = self.client.put(
             self.url,
             {
                 "coldSensitivity": "NORMAL",
                 "exercisePreference": "EVENING",
-                "laundryPreferences": ["NONE", "RAIN_BEFORE"],
+                "laundryPreferences": ["DAILY_SUMMARY", "RAIN_BEFORE"],
             },
             format="json",
         )
@@ -106,7 +109,7 @@ class PremiumProfileAPITests(APITestCase):
             {
                 "coldSensitivity": "NORMAL",
                 "exercisePreference": "NO_NOTIFICATION",
-                "laundryPreferences": ["NONE"],
+                "laundryPreferences": ["DAILY_SUMMARY"],
             },
             format="json",
         )

@@ -18,6 +18,10 @@ from situations.services.laundry import build_laundry_info
 
 from home.services.life_info import get_outfit
 from premium.models import NotificationPreference, PremiumProfile
+from situations.services.notification_recommendations import (
+    build_laundry_message,
+    build_outerwear_message,
+)
 from situations.services.recommendations import (
     OUTFIT_MESSAGES,
     build_outing_message,
@@ -33,7 +37,11 @@ from situations.services.airkorea import PM10_LIMITS, grade_of
 from situations.services.running import build_running_info
 from situations.services.uv import summarize_uv, uv_grade
 
-from situations.models import NotificationSchedule, WaterIntake
+from situations.models import (
+    NotificationLog,
+    NotificationSchedule,
+    WaterIntake,
+)
 from situations.services.hydration import intake_message, recommended_ml
 
 
@@ -411,6 +419,78 @@ class OutingNotificationPreferenceTests(SimpleTestCase):
         self.assertNotIn("우산", body)
 
 
+class DailyRecommendationMessageTests(SimpleTestCase):
+    def test_outerwear_message_uses_temperature_and_user_sensitivity(self):
+        profile = PremiumProfile(
+            cold_sensitivity=PremiumProfile.ColdSensitivity.VERY_SENSITIVE,
+        )
+
+        title, body = build_outerwear_message(
+            profile=profile,
+            current_weather={"feelsLike": 12},
+        )
+
+        self.assertIn("옷차림", title)
+        self.assertIn("체감온도는 12.0℃", body)
+        self.assertIn("트렌치코트", body)
+
+    def test_laundry_combines_all_matching_selected_conditions(self):
+        profile = PremiumProfile(
+            laundry_rain_alert=True,
+            laundry_humidity_alert=True,
+            laundry_indoor_tip=True,
+        )
+
+        title, body = build_laundry_message(
+            profile=profile,
+            current_weather={"humidity": 80},
+            hourly_weather=[
+                {
+                    "hour": 10,
+                    "condition": "RAIN",
+                    "precipitationProbability": 80,
+                }
+            ],
+        )
+
+        self.assertIn("비", title)
+        self.assertIn("비 예보", body)
+        self.assertIn("습도는 80%", body)
+        self.assertIn("제습기", body)
+
+    def test_daily_laundry_summary_reports_good_weather(self):
+        title, body = build_laundry_message(
+            profile=PremiumProfile(),
+            current_weather={"humidity": 45},
+            hourly_weather=[
+                {
+                    "hour": 10,
+                    "condition": "CLEAR",
+                    "precipitationProbability": 0,
+                }
+            ],
+        )
+
+        self.assertEqual(title, "오늘은 빨래하기 좋아요")
+        self.assertIn("습도는 45%", body)
+
+    def test_daily_laundry_summary_reports_bad_weather(self):
+        title, body = build_laundry_message(
+            profile=PremiumProfile(),
+            current_weather={"humidity": 80},
+            hourly_weather=[
+                {
+                    "hour": 10,
+                    "condition": "RAIN",
+                    "precipitationProbability": 80,
+                }
+            ],
+        )
+
+        self.assertEqual(title, "오늘은 실외 빨래를 피해주세요")
+        self.assertIn("비 예보", body)
+
+
 class DailyNotificationPreferenceSchedulerTests(APITestCase):
     def setUp(self):
         region = Region.objects.create(
@@ -486,6 +566,7 @@ class DailyNotificationPreferenceSchedulerTests(APITestCase):
         mocked_hourly,
         mocked_delivery,
     ):
+        mocked_delivery.return_value.status = NotificationLog.Status.SENT
         NotificationPreference.objects.create(
             user=self.user,
             exercise_enabled=True,
@@ -526,6 +607,7 @@ class DailyNotificationPreferenceSchedulerTests(APITestCase):
         mocked_hourly,
         mocked_delivery,
     ):
+        mocked_delivery.return_value.status = NotificationLog.Status.SENT
         profile = self.user.premium_profile
         profile.exercise_preference = PremiumProfile.ExercisePreference.FLEXIBLE
         profile.save(update_fields=["exercise_preference"])
@@ -542,6 +624,115 @@ class DailyNotificationPreferenceSchedulerTests(APITestCase):
         mocked_current.assert_called_once()
         mocked_hourly.assert_called_once()
         mocked_delivery.assert_called_once()
+
+    @override_settings(
+        OUTERWEAR_NOTIFICATION_HOUR=7,
+        WEATHER_NOTIFICATION_WINDOW_MINUTES=10,
+        LINER_ENABLED=False,
+    )
+    @patch("situations.services.scheduler.deliver_notification")
+    @patch(
+        "situations.services.scheduler.get_hourly_weather",
+        return_value=[],
+    )
+    @patch(
+        "situations.services.scheduler.get_current_weather",
+        return_value={"feelsLike": 12},
+    )
+    def test_outerwear_is_sent_daily_without_an_outing_schedule(
+        self,
+        mocked_current,
+        mocked_hourly,
+        mocked_delivery,
+    ):
+        mocked_delivery.return_value.status = NotificationLog.Status.SENT
+        NotificationPreference.objects.create(
+            user=self.user,
+            outerwear_enabled=True,
+        )
+
+        result = send_daily_preference_notifications(
+            now=datetime(2026, 10, 10, 7, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["outerwear_processed"], 1)
+        mocked_current.assert_called_once()
+        mocked_hourly.assert_called_once()
+        mocked_delivery.assert_called_once()
+        self.assertEqual(
+            mocked_delivery.call_args.kwargs["notification_type"],
+            NotificationLog.NotificationType.OUTERWEAR,
+        )
+
+    @override_settings(
+        LAUNDRY_NOTIFICATION_HOUR=7,
+        WEATHER_NOTIFICATION_WINDOW_MINUTES=10,
+        LINER_ENABLED=False,
+    )
+    @patch("situations.services.scheduler.deliver_notification")
+    @patch(
+        "situations.services.scheduler.get_hourly_weather",
+        return_value=[],
+    )
+    @patch(
+        "situations.services.scheduler.get_current_weather",
+        return_value={"humidity": 45},
+    )
+    def test_daily_laundry_summary_is_sent_every_day(
+        self,
+        mocked_current,
+        mocked_hourly,
+        mocked_delivery,
+    ):
+        mocked_delivery.return_value.status = NotificationLog.Status.SENT
+        NotificationPreference.objects.create(
+            user=self.user,
+            laundry_enabled=True,
+        )
+
+        result = send_daily_preference_notifications(
+            now=datetime(2026, 10, 10, 7, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["laundry_processed"], 1)
+        mocked_delivery.assert_called_once()
+        self.assertIn(
+            "빨래하기 좋아요",
+            mocked_delivery.call_args.kwargs["title"],
+        )
+
+    @override_settings(
+        EXERCISE_MORNING_NOTIFICATION_HOUR=7,
+        WEATHER_NOTIFICATION_WINDOW_MINUTES=10,
+        LINER_ENABLED=False,
+    )
+    @patch("situations.services.scheduler.deliver_notification")
+    @patch(
+        "situations.services.scheduler.get_hourly_weather",
+        return_value=[],
+    )
+    @patch(
+        "situations.services.scheduler.get_current_weather",
+        return_value={"feelsLike": 20, "windSpeed": 1},
+    )
+    def test_failed_delivery_is_not_counted_as_processed(
+        self,
+        mocked_current,
+        mocked_hourly,
+        mocked_delivery,
+    ):
+        mocked_delivery.return_value.status = NotificationLog.Status.FAILED
+        NotificationPreference.objects.create(
+            user=self.user,
+            exercise_enabled=True,
+        )
+
+        result = send_daily_preference_notifications(
+            now=datetime(2026, 10, 10, 7, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["exercise_processed"], 0)
+        self.assertEqual(result["errors"], 1)
 
 
 class UmbrellaScheduleDeliveryTests(APITestCase):
@@ -573,6 +764,7 @@ class UmbrellaScheduleDeliveryTests(APITestCase):
                 "hour": 8,
                 "condition": "RAIN",
                 "precipitationProbability": 80,
+                "feelsLike": 12,
             }
         ],
     )
@@ -586,6 +778,15 @@ class UmbrellaScheduleDeliveryTests(APITestCase):
         mocked_hourly,
         mocked_delivery,
     ):
+        mocked_delivery.return_value.status = NotificationLog.Status.SENT
+        PremiumProfile.objects.create(
+            user=self.user,
+            cold_sensitivity=PremiumProfile.ColdSensitivity.NORMAL,
+        )
+        NotificationPreference.objects.create(
+            user=self.user,
+            outerwear_enabled=True,
+        )
         NotificationSchedule.objects.create(
             user=self.user,
             name="학원 갈 때",
@@ -603,11 +804,15 @@ class UmbrellaScheduleDeliveryTests(APITestCase):
         self.assertEqual(result["checked"], 1)
         self.assertEqual(result["due"], 1)
         self.assertEqual(result["processed"], 1)
-        mocked_current.assert_called_once()
+        mocked_current.assert_not_called()
         mocked_hourly.assert_called_once()
         mocked_delivery.assert_called_once()
         self.assertIn(
             "우산",
+            mocked_delivery.call_args.kwargs["message"],
+        )
+        self.assertNotIn(
+            "체감온도",
             mocked_delivery.call_args.kwargs["message"],
         )
 
