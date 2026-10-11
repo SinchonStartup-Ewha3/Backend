@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 
@@ -104,6 +106,12 @@ class NotificationLog(models.Model):
 
 
     dedupe_key = models.CharField(max_length=150, unique=True)
+
+    provider_idempotency_key = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+    )
 
     title = models.CharField(max_length=100)
     body = models.TextField()

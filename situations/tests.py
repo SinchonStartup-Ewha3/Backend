@@ -1,6 +1,10 @@
 import requests
+from io import StringIO
+from uuid import uuid4
 from unittest.mock import patch
 
+from django.core.management import call_command
+from django.core.management.base import CommandError
 from django.test import SimpleTestCase, override_settings
 
 from situations.services.liner_client import generate_notification_copy
@@ -43,6 +47,8 @@ from situations.models import (
     WaterIntake,
 )
 from situations.services.hydration import intake_message, recommended_ml
+from situations.services.delivery import deliver_notification
+from situations.services.onesignal import send_push_to_user
 
 
 KST = ZoneInfo("Asia/Seoul")
@@ -169,6 +175,94 @@ class LinerNotificationCopyTests(SimpleTestCase):
                 "실내 건조를 추천해요.",
             ),
         )
+
+        mocked_post.assert_called_once()
+
+
+class OneSignalClientTests(SimpleTestCase):
+    @override_settings(
+        ONESIGNAL_APP_ID="test-app-id",
+        ONESIGNAL_REST_API_KEY="test-api-key",
+        ONESIGNAL_API_URL="https://onesignal.example/notifications",
+        ONESIGNAL_DRY_RUN=False,
+    )
+    @patch("situations.services.onesignal.requests.post")
+    def test_sends_provider_idempotency_key(self, mocked_post):
+        provider_key = str(uuid4())
+        mocked_response = mocked_post.return_value
+        mocked_response.raise_for_status.return_value = None
+        mocked_response.json.return_value = {"id": "message-id"}
+
+        result = send_push_to_user(
+            user_id=7,
+            title="알림 제목",
+            message="알림 내용",
+            idempotency_key=provider_key,
+        )
+
+        self.assertEqual(result, {"id": "message-id"})
+        request_kwargs = mocked_post.call_args.kwargs
+        self.assertEqual(
+            request_kwargs["json"]["idempotency_key"],
+            provider_key,
+        )
+        self.assertEqual(
+            request_kwargs["json"]["include_aliases"]["external_id"],
+            ["7"],
+        )
+        self.assertEqual(request_kwargs["timeout"], 10)
+
+    @override_settings(
+        ONESIGNAL_APP_ID="test-app-id",
+        ONESIGNAL_REST_API_KEY="test-api-key",
+        ONESIGNAL_DRY_RUN=True,
+    )
+    @patch("situations.services.onesignal.requests.post")
+    def test_dry_run_does_not_call_onesignal(self, mocked_post):
+        provider_key = str(uuid4())
+
+        result = send_push_to_user(
+            user_id=7,
+            title="알림 제목",
+            message="알림 내용",
+            idempotency_key=provider_key,
+        )
+
+        self.assertTrue(result["dry_run"])
+        self.assertEqual(result["idempotency_key"], provider_key)
+        mocked_post.assert_not_called()
+
+    @override_settings(
+        ONESIGNAL_APP_ID="test-app-id",
+        ONESIGNAL_REST_API_KEY="test-api-key",
+        ONESIGNAL_DRY_RUN=False,
+    )
+    def test_rejects_non_uuid_idempotency_key(self):
+        with self.assertRaisesMessage(ValueError, "UUID 형식"):
+            send_push_to_user(
+                user_id=7,
+                title="알림 제목",
+                message="알림 내용",
+                idempotency_key="not-a-uuid",
+            )
+
+    @override_settings(
+        ONESIGNAL_APP_ID="test-app-id",
+        ONESIGNAL_REST_API_KEY="test-api-key",
+        ONESIGNAL_DRY_RUN=False,
+    )
+    @patch(
+        "situations.services.onesignal.requests.post",
+        side_effect=requests.Timeout,
+    )
+    def test_network_failure_raises_runtime_error(self, mocked_post):
+        with self.assertRaisesMessage(RuntimeError, "발송에 실패"):
+            send_push_to_user(
+                user_id=7,
+                title="알림 제목",
+                message="알림 내용",
+                idempotency_key=str(uuid4()),
+            )
 
         mocked_post.assert_called_once()
 
@@ -359,6 +453,115 @@ class HydrationLogicTests(SimpleTestCase):
         self.assertIn("매우 건조", message)
 
 
+class NotificationScheduleAPITests(APITestCase):
+    def setUp(self):
+        self.region = Region.objects.create(
+            region_code="1111053000",
+            region_name="서울특별시 종로구 사직동",
+            lat="37.575000",
+            lng="126.970000",
+            grid_nx=60,
+            grid_ny=127,
+        )
+        self.user = get_user_model().objects.create_user(
+            nickname="일정사용자",
+        )
+        self.other_user = get_user_model().objects.create_user(
+            nickname="다른일정사용자",
+        )
+        self.client.force_authenticate(user=self.user)
+
+    def create_schedule(self, *, user=None, name="학원 갈 때"):
+        return NotificationSchedule.objects.create(
+            user=user or self.user,
+            name=name,
+            purpose=NotificationSchedule.Purpose.ACADEMY,
+            weekdays=[0, 4],
+            outing_time=time(18, 0),
+            region=self.region,
+            lead_minutes=NotificationSchedule.LeadMinutes.ONE_HOUR,
+        )
+
+    def test_list_returns_only_authenticated_users_schedules(self):
+        own_schedule = self.create_schedule()
+        self.create_schedule(user=self.other_user, name="다른 사용자 일정")
+
+        response = self.client.get(
+            reverse("situations:schedule-list-create")
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(len(response.data), 1)
+        self.assertEqual(response.data[0]["scheduleId"], own_schedule.pk)
+
+    def test_create_saves_authenticated_user_and_sorts_weekdays(self):
+        response = self.client.post(
+            reverse("situations:schedule-list-create"),
+            {
+                "name": "출근할 때",
+                "purpose": NotificationSchedule.Purpose.COMMUTE,
+                "weekdays": [4, 0, 2],
+                "outingTime": "08:30",
+                "regionCode": self.region.region_code,
+                "leadMinutes": 30,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        schedule = NotificationSchedule.objects.get(
+            pk=response.data["scheduleId"]
+        )
+        self.assertEqual(schedule.user, self.user)
+        self.assertEqual(schedule.weekdays, [0, 2, 4])
+
+    def test_patch_updates_schedule(self):
+        schedule = self.create_schedule()
+
+        response = self.client.patch(
+            reverse("situations:schedule-detail", args=[schedule.pk]),
+            {
+                "name": "수정된 일정",
+                "weekdays": [2],
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        schedule.refresh_from_db()
+        self.assertEqual(schedule.name, "수정된 일정")
+        self.assertEqual(schedule.weekdays, [2])
+
+    def test_delete_removes_schedule(self):
+        schedule = self.create_schedule()
+
+        response = self.client.delete(
+            reverse("situations:schedule-detail", args=[schedule.pk])
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(
+            NotificationSchedule.objects.filter(pk=schedule.pk).exists()
+        )
+
+    def test_cannot_access_another_users_schedule(self):
+        schedule = self.create_schedule(user=self.other_user)
+        url = reverse("situations:schedule-detail", args=[schedule.pk])
+
+        self.assertEqual(
+            self.client.get(url).status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertEqual(
+            self.client.patch(url, {"name": "탈취"}, format="json").status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertEqual(
+            self.client.delete(url).status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+
 class UmbrellaNotificationMessageTests(SimpleTestCase):
     def setUp(self):
         self.clear_forecast = [
@@ -465,6 +668,77 @@ class DailyRecommendationMessageTests(SimpleTestCase):
 
         self.assertEqual(title, "오늘은 실외 빨래를 피해주세요")
         self.assertIn("비 예보", body)
+
+
+class NotificationDeliveryTests(APITestCase):
+    def setUp(self):
+        self.user = get_user_model().objects.create_user(
+            nickname="발송사용자",
+        )
+
+    def deliver(self, *, dedupe_key="exercise:1:2026-10-10"):
+        return deliver_notification(
+            user=self.user,
+            notification_type=NotificationLog.NotificationType.EXERCISE,
+            target_date=TODAY,
+            dedupe_key=dedupe_key,
+            title="운동 알림",
+            message="오늘도 가볍게 움직여 보세요.",
+        )
+
+    @override_settings(ONESIGNAL_DRY_RUN=False)
+    @patch(
+        "situations.services.delivery.send_push_to_user",
+        return_value={"id": "provider-message-id"},
+    )
+    def test_sent_notification_is_not_delivered_twice(self, mocked_send):
+        first_log = self.deliver()
+        second_log = self.deliver()
+
+        self.assertEqual(first_log.pk, second_log.pk)
+        self.assertEqual(second_log.status, NotificationLog.Status.SENT)
+        self.assertEqual(second_log.attempt_count, 1)
+        mocked_send.assert_called_once()
+
+    @override_settings(ONESIGNAL_DRY_RUN=False)
+    @patch("situations.services.delivery.send_push_to_user")
+    def test_failed_notification_retries_with_same_provider_key(
+        self,
+        mocked_send,
+    ):
+        mocked_send.side_effect = [
+            RuntimeError("일시적인 발송 실패"),
+            {"id": "provider-message-id"},
+        ]
+
+        first_log = self.deliver()
+        first_provider_key = str(first_log.provider_idempotency_key)
+        second_log = self.deliver()
+
+        self.assertEqual(first_log.status, NotificationLog.Status.FAILED)
+        self.assertEqual(second_log.status, NotificationLog.Status.SENT)
+        self.assertEqual(second_log.attempt_count, 2)
+        self.assertEqual(mocked_send.call_count, 2)
+        self.assertEqual(
+            mocked_send.call_args_list[0].kwargs["idempotency_key"],
+            first_provider_key,
+        )
+        self.assertEqual(
+            mocked_send.call_args_list[1].kwargs["idempotency_key"],
+            first_provider_key,
+        )
+
+    @override_settings(ONESIGNAL_DRY_RUN=True)
+    @patch(
+        "situations.services.delivery.send_push_to_user",
+        return_value={"dry_run": True},
+    )
+    def test_dry_run_is_recorded_as_skipped(self, mocked_send):
+        log = self.deliver()
+
+        self.assertEqual(log.status, NotificationLog.Status.SKIPPED)
+        self.assertIn("Dry-run", log.error_message)
+        mocked_send.assert_called_once()
 
 
 class DailyNotificationPreferenceSchedulerTests(APITestCase):
@@ -802,6 +1076,76 @@ class UmbrellaScheduleDeliveryTests(APITestCase):
         self.assertEqual(result["checked"], 0)
         self.assertEqual(result["processed"], 0)
         mocked_current.assert_not_called()
+
+
+class SendWeatherNotificationsCommandTests(SimpleTestCase):
+    outing_result = {
+        "checked": 1,
+        "due": 1,
+        "processed": 1,
+        "skipped": 0,
+        "errors": 0,
+    }
+    preference_result = {
+        "checked": 1,
+        "outerwear_processed": 1,
+        "exercise_processed": 0,
+        "laundry_processed": 1,
+        "skipped": 0,
+        "errors": 0,
+    }
+
+    @patch(
+        "situations.management.commands.send_weather_notifications."
+        "send_daily_preference_notifications"
+    )
+    @patch(
+        "situations.management.commands.send_weather_notifications."
+        "send_due_outing_notifications"
+    )
+    def test_command_runs_both_notification_schedulers(
+        self,
+        mocked_outing,
+        mocked_preference,
+    ):
+        mocked_outing.return_value = self.outing_result
+        mocked_preference.return_value = self.preference_result
+        stdout = StringIO()
+
+        call_command(
+            "send_weather_notifications",
+            now="2026-10-10T07:00:00+09:00",
+            stdout=stdout,
+        )
+
+        mocked_outing.assert_called_once()
+        mocked_preference.assert_called_once()
+        self.assertIn("맞춤 날씨 알림 처리가 완료되었습니다.", stdout.getvalue())
+
+    @patch(
+        "situations.management.commands.send_weather_notifications."
+        "send_daily_preference_notifications"
+    )
+    @patch(
+        "situations.management.commands.send_weather_notifications."
+        "send_due_outing_notifications"
+    )
+    def test_command_fails_when_delivery_has_errors(
+        self,
+        mocked_outing,
+        mocked_preference,
+    ):
+        mocked_outing.return_value = {
+            **self.outing_result,
+            "errors": 1,
+        }
+        mocked_preference.return_value = self.preference_result
+
+        with self.assertRaises(CommandError):
+            call_command(
+                "send_weather_notifications",
+                now="2026-10-10T07:00:00+09:00",
+            )
 
 
 @patch("home.services.kma_client.now_kst", return_value=FIXED_NOW)
