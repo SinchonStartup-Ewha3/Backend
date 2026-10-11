@@ -14,7 +14,13 @@ from .serializers import (
     NicknameUpdateSerializer,
     SocialLoginSerializer,
 )
-from .services import PROFILE_FETCHERS, SocialAuthError, get_or_create_social_user
+
+from .services import (
+    PROFILE_FETCHERS,
+    SocialAuthError,
+    get_or_create_social_user,
+    withdraw_user,
+)
 
 SIX_PLACES = Decimal("0.000001")
 
@@ -59,6 +65,10 @@ class SocialLoginView(APIView):
 class MeView(APIView):
     def get(self, request):
         return Response(MeSerializer(request.user).data)
+    
+    def delete(self, request):
+        withdraw_user(request.user)
+        return Response(status=status.HTTP_204_NO_CONTENT)
 
 
 class LocationUpdateView(APIView):
