@@ -1,5 +1,9 @@
 from premium.models import PremiumProfile
-from situations.services.recommendations import recommend_outfit, will_rain
+from situations.services.recommendations import (
+    is_good_exercise_weather,
+    recommend_outfit,
+    will_rain,
+)
 
 
 def build_outerwear_message(
@@ -25,6 +29,54 @@ def build_outerwear_message(
     return (
         "오늘 외출 옷차림을 확인해 주세요",
         f"체감온도는 {temperature:.1f}℃예요. {outfit}",
+    )
+
+
+def build_umbrella_message(
+    *,
+    schedule_name: str,
+    hourly_weather: list[dict],
+) -> tuple[str, str] | None:
+    """외출 일정 주변에 비가 예상될 때 우산 알림을 만듭니다."""
+
+    if not will_rain(hourly_weather):
+        return None
+
+    return (
+        f"{schedule_name} 가기 전 우산을 챙겨주세요",
+        "비 예보가 있으니 우산을 챙겨주세요.",
+    )
+
+
+def build_exercise_message(
+    *,
+    profile: PremiumProfile,
+    current_weather: dict,
+    hourly_weather: list[dict],
+) -> tuple[str, str] | None:
+    """운동 시간 선호와 날씨에 맞는 운동 알림을 만듭니다."""
+
+    good_weather = is_good_exercise_weather(
+        current_weather,
+        hourly_weather,
+    )
+
+    if (
+        profile.exercise_preference
+        == PremiumProfile.ExercisePreference.GOOD_WEATHER_ONLY
+        and not good_weather
+    ):
+        return None
+
+    if good_weather:
+        return (
+            "오늘은 운동하기 좋은 날씨예요",
+            "비 예보가 적고 기온도 적당해요. 가볍게 운동해 볼까요?",
+        )
+
+    return (
+        "운동 전 날씨를 확인해 주세요",
+        "기온이나 비·바람을 확인하고 실내 운동도 고려해 보세요.",
     )
 
 

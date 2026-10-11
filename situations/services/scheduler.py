@@ -16,12 +16,10 @@ from situations.models import (
 )
 from situations.services.delivery import deliver_notification
 from situations.services.notification_recommendations import (
+    build_exercise_message,
     build_laundry_message,
     build_outerwear_message,
-)
-from situations.services.recommendations import (
-    build_exercise_message,
-    build_outing_message,
+    build_umbrella_message,
 )
 
 logger = logging.getLogger(__name__)
@@ -215,13 +213,9 @@ def send_due_outing_notifications(
                     outing_datetime,
                 )
 
-                outing_message = build_outing_message(
-                    profile=None,
+                outing_message = build_umbrella_message(
                     schedule_name=schedule.name,
-                    current_weather=outing_weather,
                     hourly_weather=nearby_forecast,
-                    include_outerwear=False,
-                    include_umbrella=True,
                 )
 
                 if outing_message is None:

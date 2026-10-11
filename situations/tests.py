@@ -21,10 +21,10 @@ from premium.models import NotificationPreference, PremiumProfile
 from situations.services.notification_recommendations import (
     build_laundry_message,
     build_outerwear_message,
+    build_umbrella_message,
 )
 from situations.services.recommendations import (
     OUTFIT_MESSAGES,
-    build_outing_message,
     recommend_outfit,
     will_rain,
 )
@@ -359,11 +359,8 @@ class HydrationLogicTests(SimpleTestCase):
         self.assertIn("매우 건조", message)
 
 
-class OutingNotificationPreferenceTests(SimpleTestCase):
+class UmbrellaNotificationMessageTests(SimpleTestCase):
     def setUp(self):
-        self.profile = PremiumProfile(
-            cold_sensitivity=PremiumProfile.ColdSensitivity.NORMAL,
-        )
         self.clear_forecast = [
             {
                 "hour": 18,
@@ -379,44 +376,23 @@ class OutingNotificationPreferenceTests(SimpleTestCase):
             }
         ]
 
-    def test_umbrella_only_skips_notification_when_rain_is_not_expected(self):
-        result = build_outing_message(
-            profile=self.profile,
+    def test_skips_notification_when_rain_is_not_expected(self):
+        result = build_umbrella_message(
             schedule_name="학원",
-            current_weather={"feelsLike": 12},
             hourly_weather=self.clear_forecast,
-            include_outerwear=False,
-            include_umbrella=True,
         )
 
         self.assertIsNone(result)
 
-    def test_umbrella_only_does_not_add_outerwear_content(self):
-        title, body = build_outing_message(
-            profile=self.profile,
+    def test_rain_forecast_creates_umbrella_only_message(self):
+        title, body = build_umbrella_message(
             schedule_name="학원",
-            current_weather={"feelsLike": 12},
             hourly_weather=self.rain_forecast,
-            include_outerwear=False,
-            include_umbrella=True,
         )
 
         self.assertIn("우산", title)
         self.assertIn("우산", body)
         self.assertNotIn("체감온도", body)
-
-    def test_outerwear_only_does_not_add_umbrella_content(self):
-        _, body = build_outing_message(
-            profile=self.profile,
-            schedule_name="학원",
-            current_weather={"feelsLike": 12},
-            hourly_weather=self.rain_forecast,
-            include_outerwear=True,
-            include_umbrella=False,
-        )
-
-        self.assertIn("체감온도", body)
-        self.assertNotIn("우산", body)
 
 
 class DailyRecommendationMessageTests(SimpleTestCase):
