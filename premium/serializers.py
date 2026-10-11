@@ -1,7 +1,7 @@
 from django.utils import timezone
 from rest_framework import serializers
 
-from .models import PremiumProfile
+from .models import NotificationPreference, PremiumProfile
 
 
 class PremiumProfileSerializer(serializers.ModelSerializer):
@@ -114,3 +114,17 @@ class PremiumProfileSerializer(serializers.ModelSerializer):
 
         data["laundryPreferences"] = preferences
         return data
+
+
+class NotificationPreferenceSerializer(serializers.ModelSerializer):
+    outerwearEnabled = serializers.BooleanField(source="outerwear_enabled")
+    exerciseEnabled = serializers.BooleanField(source="exercise_enabled")
+    laundryEnabled = serializers.BooleanField(source="laundry_enabled")
+
+    class Meta:
+        model = NotificationPreference
+        fields = [
+            "outerwearEnabled",
+            "exerciseEnabled",
+            "laundryEnabled",
+        ]

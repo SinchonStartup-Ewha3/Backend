@@ -8,7 +8,7 @@ from home.services.weather import (
     get_current_weather,
     get_hourly_weather,
 )
-from premium.models import PremiumProfile
+from premium.models import NotificationPreference, PremiumProfile
 from situations.services.liner_client import generate_notification_copy
 from situations.models import (
     NotificationLog,
@@ -105,10 +105,10 @@ def send_due_outing_notifications(
 
     schedules = (
         NotificationSchedule.objects
-        .filter(is_enabled=True)
         .select_related(
             "user",
             "user__premium_profile",
+            "user__notification_preference",
             "region",
         )
     )
@@ -129,8 +129,18 @@ def send_due_outing_notifications(
         try:
             profile = schedule.user.premium_profile
         except PremiumProfile.DoesNotExist:
+            profile = None
 
-            continue
+        try:
+            notification_preference = schedule.user.notification_preference
+        except NotificationPreference.DoesNotExist:
+            notification_preference = None
+
+        include_outerwear = bool(
+            profile is not None
+            and notification_preference is not None
+            and notification_preference.outerwear_enabled
+        )
 
 
         candidate_dates = [
@@ -214,12 +224,19 @@ def send_due_outing_notifications(
                     outing_datetime,
                 )
 
-                title, message = build_outing_message(
+                outing_message = build_outing_message(
                     profile=profile,
                     schedule_name=schedule.name,
                     current_weather=outing_weather,
                     hourly_weather=nearby_forecast,
+                    include_outerwear=include_outerwear,
+                    include_umbrella=True,
                 )
+
+                if outing_message is None:
+                    continue
+
+                title, message = outing_message
 
                 title, message = generate_notification_copy(
                     notification_type="OUTING_WEATHER",
@@ -227,7 +244,13 @@ def send_due_outing_notifications(
                         "scheduleName": schedule.name,
                         "regionName": region.region_name,
                         "outingTime": outing_datetime.isoformat(),
-                        "coldSensitivity": profile.cold_sensitivity,
+                        "coldSensitivity": (
+                            profile.cold_sensitivity
+                            if profile is not None
+                            else None
+                        ),
+                        "outerwearEnabled": include_outerwear,
+                        "umbrellaScheduleExists": True,
                         "weather": outing_weather,
                         "nearbyForecast": nearby_forecast[:6],
                     },
@@ -296,6 +319,9 @@ def _exercise_notification_hour(profile: PremiumProfile) -> int | None:
     if preference == PremiumProfile.ExercisePreference.GOOD_WEATHER_ONLY:
         return settings.EXERCISE_GOOD_WEATHER_NOTIFICATION_HOUR
 
+    if preference == PremiumProfile.ExercisePreference.FLEXIBLE:
+        return settings.EXERCISE_FLEXIBLE_NOTIFICATION_HOUR
+
     return None
 
 
@@ -324,6 +350,7 @@ def send_daily_preference_notifications(
         .select_related(
             "user",
             "user__region",
+            "user__notification_preference",
         )
     )
 
@@ -341,10 +368,16 @@ def send_daily_preference_notifications(
     for profile in profiles:
         result["checked"] += 1
 
+        try:
+            notification_preference = profile.user.notification_preference
+        except NotificationPreference.DoesNotExist:
+            continue
+
         exercise_hour = _exercise_notification_hour(profile)
 
         exercise_due = (
-            exercise_hour is not None
+            notification_preference.exercise_enabled
+            and exercise_hour is not None
             and _is_due_hour(now, exercise_hour, window)
         )
 
@@ -355,7 +388,8 @@ def send_daily_preference_notifications(
         ])
 
         laundry_due = (
-            laundry_selected
+            notification_preference.laundry_enabled
+            and laundry_selected
             and _is_due_hour(
                 now,
                 settings.LAUNDRY_NOTIFICATION_HOUR,

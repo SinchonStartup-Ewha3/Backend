@@ -2,8 +2,11 @@ from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from .models import PremiumProfile
-from .serializers import PremiumProfileSerializer
+from .models import NotificationPreference, PremiumProfile
+from .serializers import (
+    NotificationPreferenceSerializer,
+    PremiumProfileSerializer,
+)
 
 
 class PremiumProfileView(APIView):
@@ -35,4 +38,35 @@ class PremiumProfileView(APIView):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
+        return Response(serializer.data)
+
+
+class NotificationPreferenceView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get_preference(self, user):
+        preference, _ = NotificationPreference.objects.get_or_create(
+            user=user,
+        )
+        return preference
+
+    def get(self, request):
+        preference = self.get_preference(request.user)
+        return Response(NotificationPreferenceSerializer(preference).data)
+
+    def put(self, request):
+        return self.update_preference(request)
+
+    def patch(self, request):
+        return self.update_preference(request, partial=True)
+
+    def update_preference(self, request, partial=False):
+        preference = self.get_preference(request.user)
+        serializer = NotificationPreferenceSerializer(
+            preference,
+            data=request.data,
+            partial=partial,
+        )
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
         return Response(serializer.data)

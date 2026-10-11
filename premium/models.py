@@ -15,7 +15,7 @@ class PremiumProfile(models.Model):
         MORNING = "MORNING", "아침에 자주 해요"
         EVENING = "EVENING", "저녁에 자주 해요"
         GOOD_WEATHER_ONLY = "GOOD_WEATHER_ONLY", "날씨가 좋을 때만 해요"
-        RARELY = "RARELY", "운동을 자주 하지 않아요"
+        FLEXIBLE = "FLEXIBLE", "정해진 시간은 없어요"
 
     user = models.OneToOneField(
         settings.AUTH_USER_MODEL,
@@ -32,7 +32,7 @@ class PremiumProfile(models.Model):
     exercise_preference = models.CharField(
         max_length=30,
         choices=ExercisePreference.choices,
-        default=ExercisePreference.RARELY,
+        default=ExercisePreference.FLEXIBLE,
     )
 
     laundry_rain_alert = models.BooleanField(default=False)
@@ -45,3 +45,21 @@ class PremiumProfile(models.Model):
 
     def __str__(self):
         return f"{self.user.nickname}의 프리미엄 설정"
+
+
+class NotificationPreference(models.Model):
+    """맞춤 알림 종류별 수신 여부를 저장한다."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="notification_preference",
+    )
+    outerwear_enabled = models.BooleanField(default=False)
+    exercise_enabled = models.BooleanField(default=False)
+    laundry_enabled = models.BooleanField(default=False)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user.nickname}의 알림 설정"

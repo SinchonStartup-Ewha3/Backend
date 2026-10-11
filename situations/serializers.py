@@ -28,8 +28,6 @@ class NotificationScheduleSerializer(serializers.ModelSerializer):
         choices=NotificationSchedule.LeadMinutes.choices,
     )
 
-    isEnabled = serializers.BooleanField(source="is_enabled")
-
     weekdays = serializers.ListField(
         child=serializers.IntegerField(min_value=0, max_value=6),
         allow_empty=False,
@@ -50,7 +48,6 @@ class NotificationScheduleSerializer(serializers.ModelSerializer):
             "regionCode",
             "regionName",
             "leadMinutes",
-            "isEnabled",
         ]
 
     def validate_weekdays(self, values):

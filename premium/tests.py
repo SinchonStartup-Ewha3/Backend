@@ -3,7 +3,7 @@ from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import PremiumProfile
+from .models import NotificationPreference, PremiumProfile
 
 
 User = get_user_model()
@@ -27,7 +27,7 @@ class PremiumProfileAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["coldSensitivity"], "UNKNOWN")
-        self.assertEqual(response.data["exercisePreference"], "RARELY")
+        self.assertEqual(response.data["exercisePreference"], "FLEXIBLE")
         self.assertEqual(response.data["laundryPreferences"], ["NONE"])
         self.assertFalse(response.data["isCompleted"])
         self.assertIsNone(response.data["surveyCompletedAt"])
@@ -162,3 +162,84 @@ class PremiumProfileAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertFalse(response.data["isCompleted"])
         self.assertIsNone(response.data["surveyCompletedAt"])
+
+
+class NotificationPreferenceAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(nickname="알림설정사용자")
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("premium:notification-settings")
+
+    def test_login_is_required(self):
+        self.client.force_authenticate(user=None)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_get_returns_opt_in_defaults(self):
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data,
+            {
+                "outerwearEnabled": False,
+                "exerciseEnabled": False,
+                "laundryEnabled": False,
+            },
+        )
+        self.assertTrue(
+            NotificationPreference.objects.filter(user=self.user).exists()
+        )
+
+    def test_put_requires_and_updates_all_settings(self):
+        incomplete_response = self.client.put(
+            self.url,
+            {"exerciseEnabled": True},
+            format="json",
+        )
+
+        self.assertEqual(
+            incomplete_response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+
+        response = self.client.put(
+            self.url,
+            {
+                "outerwearEnabled": True,
+                "exerciseEnabled": True,
+                "laundryEnabled": False,
+            },
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        preference = NotificationPreference.objects.get(user=self.user)
+        self.assertTrue(preference.outerwear_enabled)
+        self.assertTrue(preference.exercise_enabled)
+        self.assertFalse(preference.laundry_enabled)
+
+    def test_patch_updates_only_the_requested_setting(self):
+        NotificationPreference.objects.create(
+            user=self.user,
+            outerwear_enabled=True,
+            laundry_enabled=True,
+        )
+
+        response = self.client.patch(
+            self.url,
+            {"exerciseEnabled": True},
+            format="json",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data,
+            {
+                "outerwearEnabled": True,
+                "exerciseEnabled": True,
+                "laundryEnabled": True,
+            },
+        )

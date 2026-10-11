@@ -48,15 +48,11 @@ class NotificationSchedule(models.Model):
         default=LeadMinutes.TWO_HOURS,
     )
 
-    is_enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["outing_time", "pk"]
-        indexes = [
-            models.Index(fields=["user", "is_enabled"]),
-        ]
 
     def __str__(self):
         return f"{self.user.nickname} - {self.name}"

@@ -149,7 +149,7 @@ class MyPageSummaryAPITests(APITestCase):
             status.HTTP_401_UNAUTHORIZED,
         )
 
-    def test_summary_contains_profile_and_notifications(self):
+    def test_summary_contains_profile_without_notification_settings(self):
         self.client.force_authenticate(self.user)
 
         response = self.client.get(
@@ -169,13 +169,5 @@ class MyPageSummaryAPITests(APITestCase):
             self.region.region_code,
         )
         self.assertIsNone(response.data["subscription"])
-        self.assertEqual(
-            response.data["notificationSettings"],
-            {
-                "outer": False,
-                "exercise": False,
-                "laundry": False,
-                "umbrella": False,
-            },
-        )
+        self.assertNotIn("notificationSettings", response.data)
         self.assertNotIn("activity", response.data)

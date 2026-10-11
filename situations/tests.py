@@ -5,7 +5,7 @@ from django.test import SimpleTestCase, override_settings
 
 from situations.services.liner_client import generate_notification_copy
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
@@ -17,18 +17,23 @@ from core.models import Region
 from situations.services.laundry import build_laundry_info
 
 from home.services.life_info import get_outfit
-from premium.models import PremiumProfile
+from premium.models import NotificationPreference, PremiumProfile
 from situations.services.recommendations import (
     OUTFIT_MESSAGES,
+    build_outing_message,
     recommend_outfit,
     will_rain,
+)
+from situations.services.scheduler import (
+    send_daily_preference_notifications,
+    send_due_outing_notifications,
 )
 
 from situations.services.airkorea import PM10_LIMITS, grade_of
 from situations.services.running import build_running_info
 from situations.services.uv import summarize_uv, uv_grade
 
-from situations.models import WaterIntake
+from situations.models import NotificationSchedule, WaterIntake
 from situations.services.hydration import intake_message, recommended_ml
 
 
@@ -344,6 +349,278 @@ class HydrationLogicTests(SimpleTestCase):
     def test_very_dry_message(self):
         message = intake_message({"humidity": 20, "maxTemperature": 22})
         self.assertIn("매우 건조", message)
+
+
+class OutingNotificationPreferenceTests(SimpleTestCase):
+    def setUp(self):
+        self.profile = PremiumProfile(
+            cold_sensitivity=PremiumProfile.ColdSensitivity.NORMAL,
+        )
+        self.clear_forecast = [
+            {
+                "hour": 18,
+                "condition": "CLEAR",
+                "precipitationProbability": 0,
+            }
+        ]
+        self.rain_forecast = [
+            {
+                "hour": 18,
+                "condition": "RAIN",
+                "precipitationProbability": 80,
+            }
+        ]
+
+    def test_umbrella_only_skips_notification_when_rain_is_not_expected(self):
+        result = build_outing_message(
+            profile=self.profile,
+            schedule_name="학원",
+            current_weather={"feelsLike": 12},
+            hourly_weather=self.clear_forecast,
+            include_outerwear=False,
+            include_umbrella=True,
+        )
+
+        self.assertIsNone(result)
+
+    def test_umbrella_only_does_not_add_outerwear_content(self):
+        title, body = build_outing_message(
+            profile=self.profile,
+            schedule_name="학원",
+            current_weather={"feelsLike": 12},
+            hourly_weather=self.rain_forecast,
+            include_outerwear=False,
+            include_umbrella=True,
+        )
+
+        self.assertIn("우산", title)
+        self.assertIn("우산", body)
+        self.assertNotIn("체감온도", body)
+
+    def test_outerwear_only_does_not_add_umbrella_content(self):
+        _, body = build_outing_message(
+            profile=self.profile,
+            schedule_name="학원",
+            current_weather={"feelsLike": 12},
+            hourly_weather=self.rain_forecast,
+            include_outerwear=True,
+            include_umbrella=False,
+        )
+
+        self.assertIn("체감온도", body)
+        self.assertNotIn("우산", body)
+
+
+class DailyNotificationPreferenceSchedulerTests(APITestCase):
+    def setUp(self):
+        region = Region.objects.create(
+            region_code="1111053000",
+            region_name="서울특별시 종로구 사직동",
+            lat="37.575000",
+            lng="126.970000",
+            grid_nx=60,
+            grid_ny=127,
+        )
+        self.user = get_user_model().objects.create_user(
+            nickname="알림스케줄러사용자",
+            region=region,
+        )
+        PremiumProfile.objects.create(
+            user=self.user,
+            cold_sensitivity=PremiumProfile.ColdSensitivity.NORMAL,
+            exercise_preference=PremiumProfile.ExercisePreference.MORNING,
+            survey_completed_at=FIXED_NOW,
+        )
+
+    @override_settings(
+        EXERCISE_MORNING_NOTIFICATION_HOUR=7,
+        WEATHER_NOTIFICATION_WINDOW_MINUTES=10,
+        LINER_ENABLED=False,
+    )
+    @patch("situations.services.scheduler.deliver_notification")
+    @patch("situations.services.scheduler.get_hourly_weather")
+    @patch("situations.services.scheduler.get_current_weather")
+    def test_disabled_exercise_setting_prevents_delivery(
+        self,
+        mocked_current,
+        mocked_hourly,
+        mocked_delivery,
+    ):
+        NotificationPreference.objects.create(
+            user=self.user,
+            exercise_enabled=False,
+        )
+
+        result = send_daily_preference_notifications(
+            now=datetime(2026, 10, 10, 7, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["exercise_processed"], 0)
+        mocked_current.assert_not_called()
+        mocked_hourly.assert_not_called()
+        mocked_delivery.assert_not_called()
+
+    @override_settings(
+        EXERCISE_MORNING_NOTIFICATION_HOUR=7,
+        WEATHER_NOTIFICATION_WINDOW_MINUTES=10,
+        LINER_ENABLED=False,
+    )
+    @patch("situations.services.scheduler.deliver_notification")
+    @patch(
+        "situations.services.scheduler.get_hourly_weather",
+        return_value=[
+            {
+                "hour": 8,
+                "condition": "CLEAR",
+                "precipitationProbability": 0,
+            }
+        ],
+    )
+    @patch(
+        "situations.services.scheduler.get_current_weather",
+        return_value={"feelsLike": 20, "windSpeed": 1},
+    )
+    def test_enabled_exercise_setting_allows_delivery(
+        self,
+        mocked_current,
+        mocked_hourly,
+        mocked_delivery,
+    ):
+        NotificationPreference.objects.create(
+            user=self.user,
+            exercise_enabled=True,
+        )
+
+        result = send_daily_preference_notifications(
+            now=datetime(2026, 10, 10, 7, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["exercise_processed"], 1)
+        mocked_current.assert_called_once()
+        mocked_hourly.assert_called_once()
+        mocked_delivery.assert_called_once()
+
+    @override_settings(
+        EXERCISE_FLEXIBLE_NOTIFICATION_HOUR=18,
+        WEATHER_NOTIFICATION_WINDOW_MINUTES=10,
+        LINER_ENABLED=False,
+    )
+    @patch("situations.services.scheduler.deliver_notification")
+    @patch(
+        "situations.services.scheduler.get_hourly_weather",
+        return_value=[
+            {
+                "hour": 19,
+                "condition": "CLEAR",
+                "precipitationProbability": 0,
+            }
+        ],
+    )
+    @patch(
+        "situations.services.scheduler.get_current_weather",
+        return_value={"feelsLike": 20, "windSpeed": 1},
+    )
+    def test_flexible_exercise_setting_uses_default_notification_hour(
+        self,
+        mocked_current,
+        mocked_hourly,
+        mocked_delivery,
+    ):
+        profile = self.user.premium_profile
+        profile.exercise_preference = PremiumProfile.ExercisePreference.FLEXIBLE
+        profile.save(update_fields=["exercise_preference"])
+        NotificationPreference.objects.create(
+            user=self.user,
+            exercise_enabled=True,
+        )
+
+        result = send_daily_preference_notifications(
+            now=datetime(2026, 10, 10, 18, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["exercise_processed"], 1)
+        mocked_current.assert_called_once()
+        mocked_hourly.assert_called_once()
+        mocked_delivery.assert_called_once()
+
+
+class UmbrellaScheduleDeliveryTests(APITestCase):
+    def setUp(self):
+        self.region = Region.objects.create(
+            region_code="1111054000",
+            region_name="서울특별시 종로구 삼청동",
+            lat="37.584000",
+            lng="126.982000",
+            grid_nx=60,
+            grid_ny=127,
+        )
+        self.user = get_user_model().objects.create_user(
+            nickname="우산일정사용자",
+            region=self.region,
+        )
+
+    @override_settings(
+        WEATHER_NOTIFICATION_WINDOW_MINUTES=10,
+        LINER_ENABLED=False,
+        FRONTEND_BASE_URL="https://example.com",
+    )
+    @patch("situations.services.scheduler.deliver_notification")
+    @patch(
+        "situations.services.scheduler.get_hourly_weather",
+        return_value=[
+            {
+                "time": "2026-10-10T08:00:00+09:00",
+                "hour": 8,
+                "condition": "RAIN",
+                "precipitationProbability": 80,
+            }
+        ],
+    )
+    @patch(
+        "situations.services.scheduler.get_current_weather",
+        return_value={},
+    )
+    def test_existing_schedule_sends_umbrella_without_global_switch(
+        self,
+        mocked_current,
+        mocked_hourly,
+        mocked_delivery,
+    ):
+        NotificationSchedule.objects.create(
+            user=self.user,
+            name="학원 갈 때",
+            purpose=NotificationSchedule.Purpose.ACADEMY,
+            weekdays=[5],
+            outing_time=time(8, 0),
+            region=self.region,
+            lead_minutes=NotificationSchedule.LeadMinutes.ONE_HOUR,
+        )
+
+        result = send_due_outing_notifications(
+            now=datetime(2026, 10, 10, 7, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["checked"], 1)
+        self.assertEqual(result["due"], 1)
+        self.assertEqual(result["processed"], 1)
+        mocked_current.assert_called_once()
+        mocked_hourly.assert_called_once()
+        mocked_delivery.assert_called_once()
+        self.assertIn(
+            "우산",
+            mocked_delivery.call_args.kwargs["message"],
+        )
+
+    @override_settings(WEATHER_NOTIFICATION_WINDOW_MINUTES=10)
+    @patch("situations.services.scheduler.get_current_weather")
+    def test_no_schedule_means_no_umbrella_delivery(self, mocked_current):
+        result = send_due_outing_notifications(
+            now=datetime(2026, 10, 10, 7, 0, tzinfo=KST),
+        )
+
+        self.assertEqual(result["checked"], 0)
+        self.assertEqual(result["processed"], 0)
+        mocked_current.assert_not_called()
 
 
 @patch("home.services.kma_client.now_kst", return_value=FIXED_NOW)

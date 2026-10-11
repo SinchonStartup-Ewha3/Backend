@@ -88,35 +88,47 @@ def is_good_exercise_weather(
 
 def build_outing_message(
     *,
-    profile: PremiumProfile,
+    profile: PremiumProfile | None,
     schedule_name: str,
     current_weather: dict,
     hourly_weather: list[dict],
-) -> tuple[str, str]:
+    include_outerwear: bool = True,
+    include_umbrella: bool = True,
+) -> tuple[str, str] | None:
     """외출 일정과 사용자 성향을 반영한 알림 문구를 만듭니다."""
 
-    temperature = current_weather.get("feelsLike")
+    message_parts = []
 
-    if temperature is None:
-        temperature = current_weather.get("temperature")
+    if include_outerwear and profile is not None:
+        temperature = current_weather.get("feelsLike")
 
-    if temperature is None:
-        outfit = "외출 전에 현재 기온을 다시 확인해 주세요."
-        temperature_text = ""
+        if temperature is None:
+            temperature = current_weather.get("temperature")
+
+        if temperature is None:
+            message_parts.append("외출 전에 현재 기온을 다시 확인해 주세요.")
+        else:
+            outfit = recommend_outfit(
+                temperature,
+                profile.cold_sensitivity,
+            )
+            message_parts.append(
+                f"체감온도는 {temperature:.1f}℃예요. {outfit}"
+            )
+
+    rain_expected = include_umbrella and will_rain(hourly_weather)
+    if rain_expected:
+        message_parts.append("비 예보가 있으니 우산도 챙겨주세요.")
+
+    if not message_parts:
+        return None
+
+    if rain_expected and not include_outerwear:
+        title = f"{schedule_name} 가기 전 우산을 챙겨주세요"
     else:
-        outfit = recommend_outfit(
-            temperature,
-            profile.cold_sensitivity,
-        )
-        temperature_text = f"체감온도는 {temperature:.1f}℃예요. "
+        title = f"{schedule_name} 외출 준비할 시간이에요"
 
-    rain_text = ""
-
-    if will_rain(hourly_weather):
-        rain_text = " 비 예보가 있으니 우산도 챙겨주세요."
-
-    title = f"{schedule_name} 외출 준비할 시간이에요"
-    message = f"{temperature_text}{outfit}{rain_text}".strip()
+    message = " ".join(message_parts)
 
     return title, message
 
@@ -128,12 +140,6 @@ def build_exercise_message(
     hourly_weather: list[dict],
 ) -> tuple[str, str] | None:
     """운동 알림을 원한 사용자에게 보낼 문구를 만듭니다."""
-
-    if (
-        profile.exercise_preference
-        == PremiumProfile.ExercisePreference.RARELY
-    ):
-        return None
 
     good_weather = is_good_exercise_weather(
         current_weather,

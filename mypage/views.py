@@ -7,8 +7,6 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from fortune.models import FortuneProfile, FortunePurchase, FortuneResult
-from premium.models import PremiumProfile
-from situations.models import NotificationSchedule
 
 from .serializers import MyPageFortuneProfileSerializer
 
@@ -20,35 +18,6 @@ class MyPageSummaryView(APIView):
 
     def get(self, request):
         user = request.user
-        premium_profile = PremiumProfile.objects.filter(
-            user=user,
-        ).first()
-
-        notification_settings = {
-            "outer": (
-                premium_profile is not None
-                and premium_profile.cold_sensitivity
-                != PremiumProfile.ColdSensitivity.UNKNOWN
-            ),
-            "exercise": (
-                premium_profile is not None
-                and premium_profile.exercise_preference
-                != PremiumProfile.ExercisePreference.RARELY
-            ),
-            "laundry": (
-                premium_profile is not None
-                and any([
-                    premium_profile.laundry_rain_alert,
-                    premium_profile.laundry_humidity_alert,
-                    premium_profile.laundry_indoor_tip,
-                ])
-            ),
-            "umbrella": NotificationSchedule.objects.filter(
-                user=user,
-                is_enabled=True,
-            ).exists(),
-        }
-
         region = user.region
 
         return Response({
@@ -66,7 +35,6 @@ class MyPageSummaryView(APIView):
             },
             # 실제 구독 모델이 추가되기 전까지 null은 무료 사용자를 뜻한다.
             "subscription": None,
-            "notificationSettings": notification_settings,
         })
 
 
