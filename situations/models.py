@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 
@@ -48,15 +50,11 @@ class NotificationSchedule(models.Model):
         default=LeadMinutes.TWO_HOURS,
     )
 
-    is_enabled = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         ordering = ["outing_time", "pk"]
-        indexes = [
-            models.Index(fields=["user", "is_enabled"]),
-        ]
 
     def __str__(self):
         return f"{self.user.nickname} - {self.name}"
@@ -72,6 +70,7 @@ class NotificationLog(models.Model):
 
     class NotificationType(models.TextChoices):
         OUTING_WEATHER = "OUTING_WEATHER", "외출 날씨"
+        OUTERWEAR = "OUTERWEAR", "겉옷"
         EXERCISE = "EXERCISE", "운동"
         LAUNDRY = "LAUNDRY", "빨래"
         FORTUNE = "FORTUNE", "운세"
@@ -107,6 +106,12 @@ class NotificationLog(models.Model):
 
 
     dedupe_key = models.CharField(max_length=150, unique=True)
+
+    provider_idempotency_key = models.UUIDField(
+        default=uuid.uuid4,
+        editable=False,
+        unique=True,
+    )
 
     title = models.CharField(max_length=100)
     body = models.TextField()

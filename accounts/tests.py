@@ -1,7 +1,3 @@
-from django.test import TestCase
-
-# Create your tests here.
-# accounts/tests.py
 from django.contrib.auth import get_user_model
 from django.urls import reverse
 from rest_framework import status
@@ -11,6 +7,7 @@ from core.models import Region
 from unittest.mock import patch
 from django.test import override_settings
 from .models import SocialAccount
+
 
 User = get_user_model()
 
@@ -56,6 +53,42 @@ class OnboardingAPITests(APITestCase):
         self.client.force_authenticate(user=None)
         response = self.client.get(reverse("me"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
+
+    def test_me_shows_social_email_as_read_only_login_account(self):
+        SocialAccount.objects.create(
+            user=self.user,
+            provider=SocialAccount.Provider.KAKAO,
+            provider_uid="kakao-test-user",
+            email="likelion@daum.net",
+        )
+
+        response = self.client.get(reverse("me"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["loginAccount"],
+            {
+                "provider": "KAKAO",
+                "email": "likelion@daum.net",
+                "displayId": "likelion@daum.net",
+            },
+        )
+
+    def test_me_uses_provider_label_when_social_email_is_missing(self):
+        SocialAccount.objects.create(
+            user=self.user,
+            provider=SocialAccount.Provider.KAKAO,
+            provider_uid="kakao-no-email-user",
+            email=None,
+        )
+
+        response = self.client.get(reverse("me"))
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            response.data["loginAccount"]["displayId"],
+            "카카오 계정",
+        )
 
     def test_set_nickname(self):
         response = self.client.patch(reverse("me-nickname"), {"nickname": "날씨요정"}, format="json")

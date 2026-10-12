@@ -11,6 +11,33 @@ from fortune.models import FortuneProfile, FortunePurchase, FortuneResult
 from .serializers import MyPageFortuneProfileSerializer
 
 
+class MyPageSummaryView(APIView):
+    """마이페이지 첫 화면에 필요한 정보를 한 번에 반환한다."""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        user = request.user
+        region = user.region
+
+        return Response({
+            "profile": {
+                "nickname": user.nickname,
+                "profileImage": user.profile_image,
+                "region": (
+                    {
+                        "regionCode": region.region_code,
+                        "regionName": region.region_name,
+                    }
+                    if region is not None
+                    else None
+                ),
+            },
+            # 실제 구독 모델이 추가되기 전까지 null은 무료 사용자를 뜻한다.
+            "subscription": None,
+        })
+
+
 class MyPageFortuneProfileView(APIView):
     permission_classes = [IsAuthenticated]
 

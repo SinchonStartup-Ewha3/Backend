@@ -1,4 +1,5 @@
 import logging
+from uuid import UUID
 
 import requests
 from django.conf import settings
@@ -12,6 +13,7 @@ def send_push_to_user(
     user_id: int | str,
     title: str,
     message: str,
+    idempotency_key: str,
     url: str | None = None,
 ) -> dict:
     """
@@ -30,9 +32,17 @@ def send_push_to_user(
     if not title.strip() or not message.strip():
         raise ValueError("알림 제목과 내용은 비어 있을 수 없습니다.")
 
+    try:
+        UUID(idempotency_key)
+    except (TypeError, ValueError, AttributeError) as exc:
+        raise ValueError(
+            "OneSignal idempotency_key는 UUID 형식이어야 합니다."
+        ) from exc
+
     payload = {
         "app_id": settings.ONESIGNAL_APP_ID,
         "target_channel": "push",
+        "idempotency_key": idempotency_key,
 
 
         "include_aliases": {
@@ -63,6 +73,7 @@ def send_push_to_user(
         )
         return {
             "dry_run": True,
+            "idempotency_key": idempotency_key,
             "target_user_id": str(user_id),
             "title": title,
             "message": message,

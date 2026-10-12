@@ -14,6 +14,7 @@ class SocialLoginSerializer(serializers.Serializer):
 class MeSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="pk", read_only=True)
     profileImage = serializers.URLField(source="profile_image", read_only=True)
+    loginAccount = serializers.SerializerMethodField()
     locationMode = serializers.CharField(source="location_mode", read_only=True)
     region = RegionSerializer(read_only=True)
     isNicknameSet = serializers.SerializerMethodField()
@@ -22,9 +23,25 @@ class MeSerializer(serializers.ModelSerializer):
     class Meta:
         model = User
         fields = [
-            "userId", "nickname", "profileImage", "locationMode",
+            "userId", "nickname", "profileImage", "loginAccount", "locationMode",
             "region", "isNicknameSet", "isOnboarded",
         ]
+
+    def get_loginAccount(self, obj):
+        social_account = obj.social_accounts.filter(
+            provider=SocialAccount.Provider.KAKAO,
+        ).first()
+        if social_account is None:
+            return None
+
+        return {
+            "provider": social_account.provider,
+            "email": social_account.email,
+            "displayId": (
+                social_account.email
+                or f"{social_account.get_provider_display()} 계정"
+            ),
+        }
 
     def get_isNicknameSet(self, obj):
         return not obj.has_temp_nickname

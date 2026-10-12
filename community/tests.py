@@ -277,7 +277,7 @@ class PostAPITests(APITestCase):
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_403_FORBIDDEN,
+            status.HTTP_404_NOT_FOUND,
         )
 
         post.refresh_from_db()
@@ -285,6 +285,54 @@ class PostAPITests(APITestCase):
         self.assertEqual(
             post.content,
             "작성자의 게시글",
+        )
+
+    def test_author_can_delete_post(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="삭제할 게시물",
+            tag=Post.Tag.COAT,
+        )
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.delete(
+            reverse(
+                "community:post-update",
+                kwargs={"post_id": post.pk},
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_204_NO_CONTENT,
+        )
+        self.assertFalse(
+            Post.objects.filter(pk=post.pk).exists()
+        )
+
+    def test_other_user_cannot_delete_post(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="작성자의 게시물",
+            tag=Post.Tag.COAT,
+        )
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.delete(
+            reverse(
+                "community:post-update",
+                kwargs={"post_id": post.pk},
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+        self.assertTrue(
+            Post.objects.filter(pk=post.pk).exists()
         )
 
     def test_feed_requires_tag(self):
@@ -331,24 +379,115 @@ class PostAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertIn("tag", response.data)
 
-    def test_post_detail_get_is_not_available(self):
-        # [기능] 모든 정보는 피드에 있으므로 별도 상세 조회는 제공하지 않는다.
+    def test_post_detail_can_be_retrieved(self):
         post = Post.objects.create(
             user=self.author,
-            content="피드에서 볼 게시물",
+            region=self.region,
+            content="상세 조회할 게시물",
             tag=Post.Tag.PADDED,
         )
         self.client.force_authenticate(user=self.author)
-        update_url = reverse(
+        detail_url = reverse(
             "community:post-update",
             kwargs={"post_id": post.pk},
         )
 
-        response = self.client.get(update_url)
+        response = self.client.get(detail_url)
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_405_METHOD_NOT_ALLOWED,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(response.data["postId"], post.pk)
+        self.assertEqual(
+            response.data["content"],
+            "상세 조회할 게시물",
+        )
+
+    def test_other_user_cannot_retrieve_post_detail(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="작성자만 볼 상세 게시물",
+            tag=Post.Tag.PADDED,
+        )
+        self.client.force_authenticate(user=self.other_user)
+
+        response = self.client.get(
+            reverse(
+                "community:post-update",
+                kwargs={"post_id": post.pk},
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
+
+    def test_my_post_list_only_contains_my_posts(self):
+        my_post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="내가 작성한 게시물",
+            tag=Post.Tag.CARDIGAN,
+        )
+        Post.objects.create(
+            user=self.other_user,
+            region=self.region,
+            content="다른 사용자의 게시물",
+            tag=Post.Tag.CARDIGAN,
+        )
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.get(
+            reverse("community:my-post-list")
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(
+            response.data["results"][0]["postId"],
+            my_post.pk,
+        )
+
+    def test_liked_post_list_only_contains_liked_posts(self):
+        liked_post = Post.objects.create(
+            user=self.other_user,
+            region=self.region,
+            content="공감한 게시물",
+            tag=Post.Tag.PADDED,
+        )
+        Post.objects.create(
+            user=self.other_user,
+            region=self.region,
+            content="공감하지 않은 게시물",
+            tag=Post.Tag.PADDED,
+        )
+        PostLike.objects.create(
+            user=self.author,
+            post=liked_post,
+        )
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.get(
+            reverse("community:liked-post-list")
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_200_OK,
+        )
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(
+            response.data["results"][0]["postId"],
+            liked_post.pk,
+        )
+        self.assertTrue(
+            response.data["results"][0]["isLiked"]
         )
 
     def test_user_can_toggle_post_like(self):

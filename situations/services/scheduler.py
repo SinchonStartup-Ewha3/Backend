@@ -8,20 +8,36 @@ from home.services.weather import (
     get_current_weather,
     get_hourly_weather,
 )
-from premium.models import PremiumProfile
+from premium.models import NotificationPreference, PremiumProfile
 from situations.services.liner_client import generate_notification_copy
 from situations.models import (
     NotificationLog,
     NotificationSchedule,
 )
 from situations.services.delivery import deliver_notification
-from situations.services.recommendations import (
+from situations.services.notification_recommendations import (
     build_exercise_message,
     build_laundry_message,
-    build_outing_message,
+    build_outerwear_message,
+    build_umbrella_message,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _record_delivery_result(
+    result: dict,
+    delivery_log: NotificationLog,
+    processed_key: str,
+) -> None:
+    """실제 발송 결과에 따라 성공·실패·제외 집계를 갱신합니다."""
+
+    if delivery_log.status == NotificationLog.Status.SENT:
+        result[processed_key] += 1
+    elif delivery_log.status == NotificationLog.Status.FAILED:
+        result["errors"] += 1
+    else:
+        result["skipped"] += 1
 
 
 def _parse_weather_time(weather: dict) -> datetime:
@@ -105,10 +121,8 @@ def send_due_outing_notifications(
 
     schedules = (
         NotificationSchedule.objects
-        .filter(is_enabled=True)
         .select_related(
             "user",
-            "user__premium_profile",
             "region",
         )
     )
@@ -117,21 +131,15 @@ def send_due_outing_notifications(
         "checked": 0,
         "due": 0,
         "processed": 0,
+        "skipped": 0,
         "errors": 0,
     }
 
  
-    weather_cache: dict[tuple[int, int], tuple[dict, list[dict]]] = {}
+    weather_cache: dict[tuple[int, int], list[dict]] = {}
 
     for schedule in schedules:
         result["checked"] += 1
-
-        try:
-            profile = schedule.user.premium_profile
-        except PremiumProfile.DoesNotExist:
-
-            continue
-
 
         candidate_dates = [
             now.date(),
@@ -171,11 +179,6 @@ def send_due_outing_notifications(
                 )
 
                 if region_key not in weather_cache:
-                    current_weather = get_current_weather(
-                        region.grid_nx,
-                        region.grid_ny,
-                        now=now,
-                    )
                     hourly_weather = get_hourly_weather(
                         region.grid_nx,
                         region.grid_ny,
@@ -183,12 +186,9 @@ def send_due_outing_notifications(
                         now=now,
                     )
 
-                    weather_cache[region_key] = (
-                        current_weather,
-                        hourly_weather,
-                    )
+                    weather_cache[region_key] = hourly_weather
 
-                current_weather, hourly_weather = weather_cache[region_key]
+                hourly_weather = weather_cache[region_key]
 
                 target_weather = _closest_weather(
                     hourly_weather,
@@ -205,7 +205,6 @@ def send_due_outing_notifications(
 
 
                 outing_weather = {
-                    **current_weather,
                     **target_weather,
                 }
 
@@ -214,12 +213,15 @@ def send_due_outing_notifications(
                     outing_datetime,
                 )
 
-                title, message = build_outing_message(
-                    profile=profile,
+                outing_message = build_umbrella_message(
                     schedule_name=schedule.name,
-                    current_weather=outing_weather,
                     hourly_weather=nearby_forecast,
                 )
+
+                if outing_message is None:
+                    continue
+
+                title, message = outing_message
 
                 title, message = generate_notification_copy(
                     notification_type="OUTING_WEATHER",
@@ -227,7 +229,8 @@ def send_due_outing_notifications(
                         "scheduleName": schedule.name,
                         "regionName": region.region_name,
                         "outingTime": outing_datetime.isoformat(),
-                        "coldSensitivity": profile.cold_sensitivity,
+                        "outerwearEnabled": False,
+                        "umbrellaScheduleExists": True,
                         "weather": outing_weather,
                         "nearbyForecast": nearby_forecast[:6],
                     },
@@ -240,7 +243,7 @@ def send_due_outing_notifications(
                     f"outing:{schedule.pk}:{outing_date.isoformat()}"
                 )
 
-                deliver_notification(
+                delivery_log = deliver_notification(
                     user=schedule.user,
                     schedule=schedule,
                     notification_type=(
@@ -253,7 +256,11 @@ def send_due_outing_notifications(
                     url=settings.FRONTEND_BASE_URL,
                 )
 
-                result["processed"] += 1
+                _record_delivery_result(
+                    result,
+                    delivery_log,
+                    "processed",
+                )
 
             except Exception:
                 result["errors"] += 1
@@ -296,6 +303,9 @@ def _exercise_notification_hour(profile: PremiumProfile) -> int | None:
     if preference == PremiumProfile.ExercisePreference.GOOD_WEATHER_ONLY:
         return settings.EXERCISE_GOOD_WEATHER_NOTIFICATION_HOUR
 
+    if preference == PremiumProfile.ExercisePreference.FLEXIBLE:
+        return settings.EXERCISE_FLEXIBLE_NOTIFICATION_HOUR
+
     return None
 
 
@@ -303,7 +313,7 @@ def send_daily_preference_notifications(
     now: datetime | None = None,
 ) -> dict:
     """
-    사용자의 설문 결과에 따라 운동·빨래 알림을 처리합니다.
+    사용자의 설문 결과에 따라 겉옷·운동·빨래 알림을 처리합니다.
 
     사용자 기본 지역의 날씨를 사용하며,
     설문을 완료하지 않았거나 지역이 없으면 제외합니다.
@@ -324,11 +334,13 @@ def send_daily_preference_notifications(
         .select_related(
             "user",
             "user__region",
+            "user__notification_preference",
         )
     )
 
     result = {
         "checked": 0,
+        "outerwear_processed": 0,
         "exercise_processed": 0,
         "laundry_processed": 0,
         "skipped": 0,
@@ -341,21 +353,30 @@ def send_daily_preference_notifications(
     for profile in profiles:
         result["checked"] += 1
 
+        try:
+            notification_preference = profile.user.notification_preference
+        except NotificationPreference.DoesNotExist:
+            continue
+
         exercise_hour = _exercise_notification_hour(profile)
 
+        outerwear_due = (
+            notification_preference.outerwear_enabled
+            and _is_due_hour(
+                now,
+                settings.OUTERWEAR_NOTIFICATION_HOUR,
+                window,
+            )
+        )
+
         exercise_due = (
-            exercise_hour is not None
+            notification_preference.exercise_enabled
+            and exercise_hour is not None
             and _is_due_hour(now, exercise_hour, window)
         )
 
-        laundry_selected = any([
-            profile.laundry_rain_alert,
-            profile.laundry_humidity_alert,
-            profile.laundry_indoor_tip,
-        ])
-
         laundry_due = (
-            laundry_selected
+            notification_preference.laundry_enabled
             and _is_due_hour(
                 now,
                 settings.LAUNDRY_NOTIFICATION_HOUR,
@@ -364,7 +385,7 @@ def send_daily_preference_notifications(
         )
 
 
-        if not exercise_due and not laundry_due:
+        if not outerwear_due and not exercise_due and not laundry_due:
             continue
 
         try:
@@ -394,6 +415,48 @@ def send_daily_preference_notifications(
 
             current_weather, hourly_weather = weather_cache[region_key]
 
+            if outerwear_due:
+                outerwear_message = build_outerwear_message(
+                    profile=profile,
+                    current_weather=current_weather,
+                )
+
+                if outerwear_message is None:
+                    result["skipped"] += 1
+                else:
+                    title, message = outerwear_message
+                    title, message = generate_notification_copy(
+                        notification_type="OUTERWEAR",
+                        weather_context={
+                            "regionName": region.region_name,
+                            "coldSensitivity": profile.cold_sensitivity,
+                            "weather": current_weather,
+                        },
+                        fallback_title=title,
+                        fallback_body=message,
+                    )
+
+                    delivery_log = deliver_notification(
+                        user=profile.user,
+                        notification_type=(
+                            NotificationLog.NotificationType.OUTERWEAR
+                        ),
+                        target_date=now.date(),
+                        dedupe_key=(
+                            f"outerwear:{profile.user_id}:"
+                            f"{now.date().isoformat()}"
+                        ),
+                        title=title,
+                        message=message,
+                        url=settings.FRONTEND_BASE_URL,
+                    )
+
+                    _record_delivery_result(
+                        result,
+                        delivery_log,
+                        "outerwear_processed",
+                    )
+
             if exercise_due:
                 exercise_message = build_exercise_message(
                     profile=profile,
@@ -417,7 +480,7 @@ def send_daily_preference_notifications(
                         fallback_body=message,
                     )
 
-                    deliver_notification(
+                    delivery_log = deliver_notification(
                         user=profile.user,
                         notification_type=(
                             NotificationLog.NotificationType.EXERCISE
@@ -432,7 +495,11 @@ def send_daily_preference_notifications(
                         url=settings.FRONTEND_BASE_URL,
                     )
 
-                    result["exercise_processed"] += 1
+                    _record_delivery_result(
+                        result,
+                        delivery_log,
+                        "exercise_processed",
+                    )
 
             if laundry_due:
                 laundry_message = build_laundry_message(
@@ -453,13 +520,18 @@ def send_daily_preference_notifications(
                             "laundryRainAlert": profile.laundry_rain_alert,
                             "laundryHumidityAlert": profile.laundry_humidity_alert,
                             "laundryIndoorTip": profile.laundry_indoor_tip,
+                            "laundryDailySummary": not any([
+                                profile.laundry_rain_alert,
+                                profile.laundry_humidity_alert,
+                                profile.laundry_indoor_tip,
+                            ]),
                             "weather": current_weather,
                             "hourlyForecast": hourly_weather[:12],
                         },
                         fallback_title=title,
                         fallback_body=message,
                     )
-                    deliver_notification(
+                    delivery_log = deliver_notification(
                         user=profile.user,
                         notification_type=(
                             NotificationLog.NotificationType.LAUNDRY
@@ -474,7 +546,11 @@ def send_daily_preference_notifications(
                         url=settings.FRONTEND_BASE_URL,
                     )
 
-                    result["laundry_processed"] += 1
+                    _record_delivery_result(
+                        result,
+                        delivery_log,
+                        "laundry_processed",
+                    )
 
         except Exception:
             result["errors"] += 1
