@@ -1,4 +1,5 @@
 import json
+import logging
 import math
 
 from django.conf import settings
@@ -28,6 +29,9 @@ from .services.paddle import (
     verify_webhook_signature,
 )
 from .services.webhooks import PaddleWebhookValidationError, process_webhook
+
+
+logger = logging.getLogger(__name__)
 
 
 class PremiumProfileView(APIView):
@@ -189,4 +193,13 @@ class PaddleWebhookView(APIView):
                 {"detail": str(exc), "code": "INVALID_PADDLE_EVENT"},
                 status=status.HTTP_400_BAD_REQUEST,
             )
+        except Exception:
+            logger.exception(
+                "Unexpected error while processing Paddle webhook.",
+                extra={
+                    "paddle_event_id": payload.get("event_id"),
+                    "paddle_event_type": payload.get("event_type"),
+                },
+            )
+            raise
         return Response({"ok": True, "duplicate": duplicate})

@@ -28,7 +28,6 @@ def _find_purchase(transaction_id):
         return None
     return (
         PremiumPurchase.objects.select_for_update()
-        .select_related("user")
         .filter(paddle_transaction_id=transaction_id)
         .first()
     )
