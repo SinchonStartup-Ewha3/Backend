@@ -141,6 +141,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "storages",
     "rest_framework",
     "rest_framework_simplejwt",
     "accounts",
@@ -251,6 +252,39 @@ MAILERS = {
 
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
+
+# User-uploaded media uses S3 in environments that provide a bucket name.
+# Static assets remain on the existing WhiteNoise/local staticfiles backend.
+AWS_STORAGE_BUCKET_NAME = env("AWS_STORAGE_BUCKET_NAME", default="")
+AWS_S3_REGION_NAME = env("AWS_S3_REGION_NAME", default="ap-northeast-2")
+AWS_S3_CUSTOM_DOMAIN = env("AWS_S3_CUSTOM_DOMAIN", default="")
+AWS_QUERYSTRING_AUTH = env.bool("AWS_QUERYSTRING_AUTH", default=True)
+
+STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
+    "staticfiles": {
+        "BACKEND": "django.contrib.staticfiles.storage.StaticFilesStorage",
+    },
+}
+
+if AWS_STORAGE_BUCKET_NAME:
+    s3_media_options = {
+        "bucket_name": AWS_STORAGE_BUCKET_NAME,
+        "region_name": AWS_S3_REGION_NAME,
+        "location": "media",
+        "default_acl": None,
+        "file_overwrite": False,
+        "querystring_auth": AWS_QUERYSTRING_AUTH,
+    }
+    if AWS_S3_CUSTOM_DOMAIN:
+        s3_media_options["custom_domain"] = AWS_S3_CUSTOM_DOMAIN
+
+    STORAGES["default"] = {
+        "BACKEND": "storages.backends.s3.S3Storage",
+        "OPTIONS": s3_media_options,
+    }
 
 # 사용자 성향별 알림 발송 시간
 OUTERWEAR_NOTIFICATION_HOUR = env.int(
