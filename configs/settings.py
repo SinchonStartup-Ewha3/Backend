@@ -79,6 +79,15 @@ LINER_TIMEOUT_SECONDS = env.int(
     default=10,
 )
 
+# Paddle Billing (sandbox/live credentials are always supplied through env files)
+PADDLE_API_KEY = env("PADDLE_API_KEY", default="")
+PADDLE_ENVIRONMENT = env("PADDLE_ENVIRONMENT", default="sandbox")
+PADDLE_WEBHOOK_SECRET = env("PADDLE_WEBHOOK_SECRET", default="")
+PADDLE_PRICE_ID = env("PADDLE_PRICE_ID", default="")
+PADDLE_PREMIUM_AMOUNT = 2500
+PADDLE_PREMIUM_CURRENCY = "KRW"
+PADDLE_PREMIUM_DURATION_DAYS = 21
+
 # 커뮤니티 날씨 문구 생성에 사용할 LINER 모델
 # 운영 중 문구 스타일이 갑자기 바뀌지 않도록 버전을 고정합니다.
 LINER_COMMUNITY_MODEL = env(

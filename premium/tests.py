@@ -1,9 +1,12 @@
+from datetime import timedelta
+
 from django.contrib.auth import get_user_model
 from django.urls import reverse
+from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import NotificationPreference, PremiumProfile
+from .models import NotificationPreference, PremiumEntitlement, PremiumProfile
 
 
 User = get_user_model()
@@ -12,6 +15,11 @@ User = get_user_model()
 class PremiumProfileAPITests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(nickname="프리미엄사용자")
+        PremiumEntitlement.objects.create(
+            user=self.user,
+            started_at=timezone.now() - timedelta(days=1),
+            expires_at=timezone.now() + timedelta(days=20),
+        )
         self.client.force_authenticate(user=self.user)
         self.url = reverse("premium:profile")
 
@@ -170,6 +178,11 @@ class PremiumProfileAPITests(APITestCase):
 class NotificationPreferenceAPITests(APITestCase):
     def setUp(self):
         self.user = User.objects.create_user(nickname="알림설정사용자")
+        PremiumEntitlement.objects.create(
+            user=self.user,
+            started_at=timezone.now() - timedelta(days=1),
+            expires_at=timezone.now() + timedelta(days=20),
+        )
         self.client.force_authenticate(user=self.user)
         self.url = reverse("premium:notification-settings")
 

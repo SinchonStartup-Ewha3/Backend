@@ -330,6 +330,8 @@ def send_daily_preference_notifications(
         .filter(
             survey_completed_at__isnull=False,
             user__region__isnull=False,
+            user__premium_entitlement__started_at__lte=now,
+            user__premium_entitlement__expires_at__gt=now,
         )
         .select_related(
             "user",
