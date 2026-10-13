@@ -6,7 +6,9 @@ from datetime import timedelta
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
+from django.db import connection, transaction
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
@@ -190,6 +192,33 @@ class PaddleWebhookTests(APITestCase):
             expires_at,
         )
 
+    def test_unknown_simulator_transaction_is_ignored_without_grant(self):
+        payload = self.payload(event_id="ntfsimevt_unknown_transaction")
+        payload["notification_id"] = "ntfsimntf_unknown_transaction"
+        payload["data"]["id"] = "txn_simulator_missing"
+
+        response = self.post_payload(payload)
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertFalse(response.data["duplicate"])
+        self.assertEqual(PaddleWebhookEvent.objects.count(), 1)
+        self.assertFalse(PremiumEntitlement.objects.filter(user=self.user).exists())
+        self.purchase.refresh_from_db()
+        self.assertEqual(self.purchase.status, PremiumPurchase.Status.PENDING)
+
+    def test_purchase_lock_query_does_not_join_nullable_user(self):
+        from .services.webhooks import _find_purchase
+
+        with transaction.atomic(), CaptureQueriesContext(connection) as queries:
+            purchase = _find_purchase(self.purchase.paddle_transaction_id)
+
+        self.assertEqual(purchase, self.purchase)
+        select_sql = next(
+            query["sql"] for query in queries.captured_queries
+            if "premium_premiumpurchase" in query["sql"]
+        )
+        self.assertNotIn(" JOIN ", select_sql.upper())
+
     def test_second_purchase_stacks_after_remaining_period(self):
         self.post_payload(self.payload())
         first_entitlement = PremiumEntitlement.objects.get(user=self.user)
@@ -237,6 +266,20 @@ class PaddleWebhookTests(APITestCase):
         response = self.post_payload(self.payload(), secret="wrong-secret")
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
         self.assertFalse(PremiumEntitlement.objects.filter(user=self.user).exists())
+
+    @patch("premium.views.logger.exception")
+    @patch("premium.views.process_webhook", side_effect=RuntimeError("database failed"))
+    def test_unexpected_processing_error_is_logged_and_remains_500(
+        self,
+        _mocked_process_webhook,
+        mocked_logger,
+    ):
+        self.client.raise_request_exception = False
+
+        response = self.post_payload(self.payload(event_id="evt_unexpected_error"))
+
+        self.assertEqual(response.status_code, status.HTTP_500_INTERNAL_SERVER_ERROR)
+        mocked_logger.assert_called_once()
 
     def test_past_due_and_canceled_transactions_do_not_grant(self):
         failed_payload = self.payload(
