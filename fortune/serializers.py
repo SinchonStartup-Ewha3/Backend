@@ -8,7 +8,9 @@ from .models import (
     FortuneResult,
 )
 from .services.calender import convert_to_solar_date
-
+from .services.calender import convert_to_solar_date
+from .services.generator import WEATHER_LABELS
+from .services.saju import LuckLevel
 
 class FortuneProfileSerializer(serializers.ModelSerializer):
     class Meta:
@@ -173,6 +175,14 @@ class FortunePurchaseSerializer(serializers.ModelSerializer):
 class FortuneResultSerializer(serializers.ModelSerializer):
     detail_text = serializers.SerializerMethodField()
     detail_locked = serializers.SerializerMethodField()
+    luck_label = serializers.SerializerMethodField()
+    weather_label = serializers.SerializerMethodField()
+
+    def get_luck_label(self, obj):
+        return LuckLevel(obj.luck_level).label
+
+    def get_weather_label(self, obj):
+        return WEATHER_LABELS.get(obj.weather_condition)
 
     def _can_view_detail(self):
         return bool(
@@ -194,6 +204,11 @@ class FortuneResultSerializer(serializers.ModelSerializer):
             "id",
             "target_date",
             "title",
+            "luck_level",
+            "luck_label",
+            "summary",
+            "weather_condition",
+            "weather_label",
             "image_url",
             "lucky_color",
             "lucky_item",
