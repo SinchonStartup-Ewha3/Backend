@@ -1,5 +1,3 @@
-from rest_framework import serializers
-
 from core.geo import find_nearest_region
 from core.models import Region
 from core.serializers import RegionSerializer
