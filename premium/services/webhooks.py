@@ -11,6 +11,8 @@ from premium.models import (
     PremiumPurchase,
 )
 
+from .entitlements import revoke_unused_entitlement
+
 
 class PaddleWebhookValidationError(Exception):
     pass
@@ -145,31 +147,6 @@ def _mark_transaction_state(data, event_type):
     purchase.save(update_fields=["status", "failure_reason", "modified_at"])
 
 
-def _revoke_unused_entitlement(purchase, occurred_at):
-    if purchase.revoked_at:
-        return
-    purchase.revoked_at = occurred_at
-    if not purchase.entitlement_expires_at or purchase.user is None:
-        return
-
-    entitlement = (
-        PremiumEntitlement.objects.select_for_update()
-        .filter(user=purchase.user)
-        .first()
-    )
-    if entitlement and entitlement.expires_at and entitlement.expires_at > occurred_at:
-        unused_from = max(occurred_at, purchase.entitlement_started_at)
-        unused_duration = max(
-            timedelta(0),
-            purchase.entitlement_expires_at - unused_from,
-        )
-        entitlement.expires_at = max(
-            occurred_at,
-            entitlement.expires_at - unused_duration,
-        )
-        entitlement.save(update_fields=["expires_at", "modified_at"])
-
-
 def _process_adjustment(data, occurred_at):
     action = data.get("action")
     status = data.get("status")
@@ -188,7 +165,7 @@ def _process_adjustment(data, occurred_at):
         )
         return
 
-    _revoke_unused_entitlement(purchase, occurred_at)
+    revoke_unused_entitlement(purchase, occurred_at)
     purchase.status = (
         PremiumPurchase.Status.CHARGEBACK
         if action == "chargeback"
