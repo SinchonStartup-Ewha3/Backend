@@ -23,7 +23,7 @@ class MyPageSummaryView(APIView):
         return Response({
             "profile": {
                 "nickname": user.nickname,
-                "profileImage": user.profile_image,
+                "profileImage": user.get_profile_image_url(request),
                 "region": (
                     {
                         "regionCode": region.region_code,

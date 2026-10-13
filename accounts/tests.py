@@ -9,6 +9,7 @@ from django.test import override_settings
 from .models import SocialAccount
 
 import requests
+from rest_framework_simplejwt.tokens import RefreshToken
 
 User = get_user_model()
 
@@ -173,3 +174,23 @@ class WithdrawAPITests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
         mock_post.assert_called_once()
+
+class TokenRefreshAPITests(APITestCase):
+    def test_refresh_returns_new_access_token(self):
+        user = User.objects.create_user(nickname="재발급")
+        refresh = RefreshToken.for_user(user)
+
+        res = self.client.post(reverse("token-refresh"), {"refresh": str(refresh)}, format="json")
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertIn("access", res.data)
+
+    def test_refresh_with_deleted_user_returns_401(self):
+        user = User.objects.create_user(nickname="탈퇴한사람")
+        refresh = RefreshToken.for_user(user)
+        user.delete()
+
+        res = self.client.post(reverse("token-refresh"), {"refresh": str(refresh)}, format="json")
+
+        self.assertEqual(res.status_code, status.HTTP_401_UNAUTHORIZED)
+        self.assertEqual(res.data["code"], "user_not_found")

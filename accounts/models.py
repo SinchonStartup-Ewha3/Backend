@@ -36,7 +36,10 @@ class User(AbstractBaseUser, PermissionsMixin):
         MANUAL = "MANUAL", "직접 설정"
 
     nickname = models.CharField(max_length=20, unique=True)
-    profile_image = models.URLField(max_length=500, null=True, blank=True)
+    profile_image = models.URLField(max_length=500, null=True, blank=True)  # 카카오 프로필 사진
+    uploaded_profile_image = models.ImageField(  # 사용자가 직접 올린 사진
+        upload_to="profiles/%Y/%m/", null=True, blank=True
+    )
     location_mode = models.CharField(
         max_length=10, choices=LocationMode.choices, null=True, blank=True
     )
@@ -48,6 +51,12 @@ class User(AbstractBaseUser, PermissionsMixin):
     created_at = models.DateTimeField(auto_now_add=True)
 
     objects = UserManager()
+    def get_profile_image_url(self, request=None):
+        """직접 올린 사진이 있으면 그 주소를, 없으면 카카오 프로필 사진을 쓴다"""
+        if self.uploaded_profile_image:
+            url = self.uploaded_profile_image.url
+            return request.build_absolute_uri(url) if request else url
+        return self.profile_image
     USERNAME_FIELD = "nickname"
 
     @property

@@ -6,12 +6,14 @@ from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework_simplejwt.tokens import RefreshToken
+from rest_framework.parsers import FormParser, MultiPartParser
 
 from .models import User
 from .serializers import (
     LocationUpdateSerializer,
     MeSerializer,
     NicknameUpdateSerializer,
+    ProfileImageUpdateSerializer,
     SocialLoginSerializer,
 )
 
@@ -64,7 +66,7 @@ class SocialLoginView(APIView):
 
 class MeView(APIView):
     def get(self, request):
-        return Response(MeSerializer(request.user).data)
+        return Response(MeSerializer(request.user, context={"request": request}).data)
     
     def delete(self, request):
         withdraw_user(request.user)
@@ -86,7 +88,7 @@ class LocationUpdateView(APIView):
 
         user.refresh_onboarding_status()
         user.save(update_fields=["location_mode", "region", "last_lat", "last_lng", "is_onboarded"])
-        return Response(MeSerializer(user).data)
+        return Response(MeSerializer(user, context={"request": request}).data)
 
 
 class NicknameUpdateView(APIView):
@@ -105,4 +107,28 @@ class NicknameUpdateView(APIView):
                 {"nickname": ["이미 사용 중인 닉네임입니다."]},
                 status=status.HTTP_400_BAD_REQUEST,
             )
-        return Response(MeSerializer(user).data)
+        return Response(MeSerializer(user, context={"request": request}).data)
+
+class ProfileImageView(APIView):
+    parser_classes = [MultiPartParser, FormParser]
+
+    def patch(self, request):
+        serializer = ProfileImageUpdateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        user = request.user
+
+        # 이전에 올린 사진 파일은 지우고 새 사진으로 바꾼다
+        if user.uploaded_profile_image:
+            user.uploaded_profile_image.delete(save=False)
+        user.uploaded_profile_image = serializer.validated_data["profileImage"]
+        user.save(update_fields=["uploaded_profile_image"])
+        return Response(MeSerializer(user, context={"request": request}).data)
+
+    def delete(self, request):
+        """직접 올린 사진을 지우고 카카오 프로필 사진으로 되돌린다"""
+        user = request.user
+        if user.uploaded_profile_image:
+            user.uploaded_profile_image.delete(save=False)
+            user.uploaded_profile_image = None
+            user.save(update_fields=["uploaded_profile_image"])
+        return Response(MeSerializer(user, context={"request": request}).data)

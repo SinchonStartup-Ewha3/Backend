@@ -120,6 +120,9 @@ def withdraw_user(user) -> None:
         unlinker = UNLINKERS.get(social.provider)
         if unlinker:
             unlinker(social.provider_uid)
+    # 직접 올린 프로필 사진 파일도 함께 지운다
+    if user.uploaded_profile_image:
+        user.uploaded_profile_image.delete(save=False)
 
     with transaction.atomic():
         # 결제 기록은 정산용으로 남기되, 정산에 필요 없는 생년월일 정보는 지운다

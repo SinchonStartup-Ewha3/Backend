@@ -4,7 +4,9 @@ from core.geo import find_nearest_region
 from core.models import Region
 from core.serializers import RegionSerializer
 from .models import SocialAccount, User
-
+from rest_framework import serializers
+from rest_framework.exceptions import AuthenticationFailed
+from rest_framework_simplejwt.serializers import TokenRefreshSerializer
 
 class SocialLoginSerializer(serializers.Serializer):
     provider = serializers.ChoiceField(choices=SocialAccount.Provider.choices)
@@ -13,7 +15,7 @@ class SocialLoginSerializer(serializers.Serializer):
 
 class MeSerializer(serializers.ModelSerializer):
     userId = serializers.IntegerField(source="pk", read_only=True)
-    profileImage = serializers.URLField(source="profile_image", read_only=True)
+    profileImage = serializers.SerializerMethodField()
     loginAccount = serializers.SerializerMethodField()
     locationMode = serializers.CharField(source="location_mode", read_only=True)
     region = RegionSerializer(read_only=True)
@@ -27,6 +29,9 @@ class MeSerializer(serializers.ModelSerializer):
             "region", "isNicknameSet", "isOnboarded",
         ]
 
+    def get_profileImage(self, obj):
+        return obj.get_profile_image_url(self.context.get("request"))    
+    
     def get_loginAccount(self, obj):
         social_account = obj.social_accounts.filter(
             provider=SocialAccount.Provider.KAKAO,
@@ -90,3 +95,25 @@ class NicknameUpdateSerializer(serializers.Serializer):
         if User.objects.filter(nickname=value).exclude(pk=user.pk).exists():
             raise serializers.ValidationError("이미 사용 중인 닉네임입니다.")
         return value
+
+class ProfileImageUpdateSerializer(serializers.Serializer):
+    profileImage = serializers.ImageField()
+
+    def validate_profileImage(self, image):
+        if image.size > 5 * 1024 * 1024:
+            raise serializers.ValidationError("이미지 크기는 5MB 이하여야 합니다.")
+        if image.content_type not in {"image/jpeg", "image/png", "image/webp"}:
+            raise serializers.ValidationError("JPG, PNG, WEBP 이미지만 등록할 수 있습니다.")
+        return image
+
+class SafeTokenRefreshSerializer(TokenRefreshSerializer):
+    """탈퇴한 회원의 refresh token이면 500 대신 401을 돌려준다"""
+
+    def validate(self, attrs):
+        try:
+            return super().validate(attrs)
+        except User.DoesNotExist:
+            raise AuthenticationFailed({
+                "detail": "탈퇴했거나 존재하지 않는 사용자입니다.",
+                "code": "user_not_found",
+            })
