@@ -127,8 +127,8 @@ class FortunePurchase(models.Model):
         max_length=20,
         choices=FortuneProfile.CalendarType.choices,
     )
-    birth_date = models.DateField()
-    converted_solar_date = models.DateField()
+    birth_date = models.DateField(null=True, blank=True)
+    converted_solar_date = models.DateField(null=True, blank=True)
     birth_time = models.TimeField(null=True, blank=True)
     birth_time_unknown = models.BooleanField(default=False)
 

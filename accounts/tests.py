@@ -8,6 +8,8 @@ from unittest.mock import patch
 from django.test import override_settings
 from .models import SocialAccount
 
+from unittest.mock import patch
+import requests
 
 User = get_user_model()
 
@@ -148,6 +150,10 @@ class WithdrawAPITests(APITestCase):
         self.assertFalse(SocialAccount.objects.filter(provider_uid="12345").exists())
         self.purchase.refresh_from_db()
         self.assertIsNone(self.purchase.user)
+        self.assertEqual(self.purchase.amount, 990)
+        self.assertIsNone(self.purchase.birth_date)
+        self.assertIsNone(self.purchase.converted_solar_date)
+        self.assertIsNone(self.purchase.birth_time)
         self.assertEqual(mock_post.call_args.kwargs["data"]["target_id"], "12345")
 
     @override_settings(KAKAO_ADMIN_KEY="test-admin-key")
@@ -159,3 +165,12 @@ class WithdrawAPITests(APITestCase):
 
         self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
         self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
+    
+    @override_settings(KAKAO_ADMIN_KEY="test-admin-key")
+    @patch("accounts.services.requests.post", side_effect=requests.Timeout)
+    def test_withdraw_continues_when_kakao_network_error(self, mock_post):
+        res = self.client.delete(self.url)
+
+        self.assertEqual(res.status_code, status.HTTP_204_NO_CONTENT)
+        self.assertFalse(User.objects.filter(pk=self.user.pk).exists())
+        mock_post.assert_called_once()
