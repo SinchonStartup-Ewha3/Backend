@@ -5,7 +5,13 @@ from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
-
+import io
+import os
+import shutil
+import tempfile
+from django.core.files.uploadedfile import SimpleUploadedFile
+from django.test import override_settings
+from PIL import Image
 from core.models import Region
 from fortune.models import (
     FortuneProduct,
@@ -13,6 +19,7 @@ from fortune.models import (
     FortunePurchase,
     FortuneResult,
 )
+User = get_user_model()
 
 
 class MyPageFortuneProfileAPITests(APITestCase):
@@ -171,3 +178,75 @@ class MyPageSummaryAPITests(APITestCase):
         self.assertIsNone(response.data["subscription"])
         self.assertNotIn("notificationSettings", response.data)
         self.assertNotIn("activity", response.data)
+
+TEST_MEDIA_ROOT = tempfile.mkdtemp()
+
+
+def make_image_file(name="profile.png", fmt="PNG", content_type="image/png"):
+    buffer = io.BytesIO()
+    Image.new("RGB", (10, 10), "skyblue").save(buffer, format=fmt)
+    return SimpleUploadedFile(name, buffer.getvalue(), content_type=content_type)
+
+
+@override_settings(MEDIA_ROOT=TEST_MEDIA_ROOT)
+class ProfileImageAPITests(APITestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            nickname="사진테스트", profile_image="http://k.kakaocdn.net/kakao.jpg",
+        )
+        self.client.force_authenticate(user=self.user)
+        self.url = reverse("me-profile-image")
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        shutil.rmtree(TEST_MEDIA_ROOT, ignore_errors=True)
+
+    def test_me_returns_kakao_image_by_default(self):
+        res = self.client.get(reverse("me"))
+        self.assertEqual(res.data["profileImage"], "http://k.kakaocdn.net/kakao.jpg")
+
+    def test_upload_profile_image(self):
+        res = self.client.patch(self.url, {"profileImage": make_image_file()}, format="multipart")
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertTrue(res.data["profileImage"].startswith("http://testserver/media/profiles/"))
+        self.user.refresh_from_db()
+        self.assertTrue(self.user.uploaded_profile_image)
+
+    def test_upload_replaces_old_file(self):
+        self.client.patch(self.url, {"profileImage": make_image_file("a.png")}, format="multipart")
+        self.user.refresh_from_db()
+        old_path = self.user.uploaded_profile_image.path
+
+        self.client.patch(self.url, {"profileImage": make_image_file("b.png")}, format="multipart")
+
+        self.assertFalse(os.path.exists(old_path))
+
+    def test_delete_restores_kakao_image(self):
+        self.client.patch(self.url, {"profileImage": make_image_file()}, format="multipart")
+
+        res = self.client.delete(self.url)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["profileImage"], "http://k.kakaocdn.net/kakao.jpg")
+
+    def test_reject_non_image_file(self):
+        fake = SimpleUploadedFile("a.png", b"not an image", content_type="image/png")
+        res = self.client.patch(self.url, {"profileImage": fake}, format="multipart")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    def test_reject_unsupported_type(self):
+        gif = make_image_file("a.gif", fmt="GIF", content_type="image/gif")
+        res = self.client.patch(self.url, {"profileImage": gif}, format="multipart")
+        self.assertEqual(res.status_code, status.HTTP_400_BAD_REQUEST)
+
+    @override_settings(KAKAO_ADMIN_KEY="")
+    def test_withdraw_deletes_uploaded_file(self):
+        self.client.patch(self.url, {"profileImage": make_image_file()}, format="multipart")
+        self.user.refresh_from_db()
+        path = self.user.uploaded_profile_image.path
+
+        self.client.delete(reverse("me"))
+
+        self.assertFalse(os.path.exists(path))

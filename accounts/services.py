@@ -114,8 +114,22 @@ UNLINKERS = {
 
 def withdraw_user(user) -> None:
     """소셜 연결을 끊고 회원과 관련 데이터를 삭제한다."""
+    from fortune.models import FortunePurchase
+
     for social in user.social_accounts.all():
         unlinker = UNLINKERS.get(social.provider)
         if unlinker:
             unlinker(social.provider_uid)
-    user.delete()
+    # 직접 올린 프로필 사진 파일도 함께 지운다
+    if user.uploaded_profile_image:
+        user.uploaded_profile_image.delete(save=False)
+
+    with transaction.atomic():
+        # 결제 기록은 정산용으로 남기되, 정산에 필요 없는 생년월일 정보는 지운다
+        FortunePurchase.objects.filter(user=user).update(
+            birth_date=None,
+            converted_solar_date=None,
+            birth_time=None,
+            birth_time_unknown=True,
+        )
+        user.delete()

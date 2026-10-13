@@ -169,6 +169,8 @@ SIMPLE_JWT = {
     "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
     # User의 PK 필드명이 id가 아니라 user_id라면 아래 주석 해제
     # "USER_ID_FIELD": "user_id",
+    # 탈퇴한 회원의 refresh token으로 재발급 요청 시 500 대신 401 반환
+    "TOKEN_REFRESH_SERIALIZER": "accounts.serializers.SafeTokenRefreshSerializer",
 }
 
 MIDDLEWARE = [
