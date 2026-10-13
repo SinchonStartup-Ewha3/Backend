@@ -8,7 +8,6 @@ from unittest.mock import patch
 from django.test import override_settings
 from .models import SocialAccount
 
-from unittest.mock import patch
 import requests
 
 User = get_user_model()
