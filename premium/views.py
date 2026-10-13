@@ -121,6 +121,57 @@ class PremiumStatusView(APIView):
         )
 
 
+class PremiumBillingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        now = timezone.now()
+        entitlement = PremiumEntitlement.objects.filter(
+            user=request.user,
+        ).first()
+        is_premium = bool(entitlement and entitlement.is_active(now))
+        remaining_seconds = 0
+        if is_premium:
+            remaining_seconds = max(
+                0,
+                math.ceil((entitlement.expires_at - now).total_seconds()),
+            )
+
+        latest_purchase = (
+            PremiumPurchase.objects.filter(
+                user=request.user,
+                completed_at__isnull=False,
+            )
+            .order_by("-completed_at", "-pk")
+            .first()
+        )
+        can_request_refund = (
+            PremiumPurchase.objects.filter(
+                user=request.user,
+                status=PremiumPurchase.Status.COMPLETED,
+                revoked_at__isnull=True,
+                entitlement_expires_at__gt=now,
+                refund_request__isnull=True,
+            ).exists()
+        )
+
+        subscription_data = None
+        if latest_purchase is not None:
+            subscription_data = {
+                "purchaseId": latest_purchase.pk,
+                "productName": "맞춤형 행동 알림",
+                "status": latest_purchase.status,
+                "purchasedAt": latest_purchase.completed_at,
+                "startedAt": entitlement.started_at if entitlement else None,
+                "expiresAt": entitlement.expires_at if entitlement else None,
+                "isActive": is_premium,
+                "remainingSeconds": remaining_seconds,
+                "canRequestRefund": can_request_refund,
+            }
+
+        return Response({"subscription": subscription_data})
+
+
 class PremiumCheckoutView(APIView):
     permission_classes = [IsAuthenticated]
 
