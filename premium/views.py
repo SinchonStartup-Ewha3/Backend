@@ -3,6 +3,7 @@ import logging
 import math
 
 from django.conf import settings
+from django.db import IntegrityError, transaction
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -14,11 +15,13 @@ from .models import (
     PremiumEntitlement,
     PremiumProfile,
     PremiumPurchase,
+    PremiumRefundRequest,
 )
 from .permissions import HasActivePremium
 from .serializers import (
     NotificationPreferenceSerializer,
     PremiumProfileSerializer,
+    PremiumRefundRequestSerializer,
 )
 from .services.paddle import (
     PaddleAPIError,
@@ -118,6 +121,57 @@ class PremiumStatusView(APIView):
         )
 
 
+class PremiumBillingView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        now = timezone.now()
+        entitlement = PremiumEntitlement.objects.filter(
+            user=request.user,
+        ).first()
+        is_premium = bool(entitlement and entitlement.is_active(now))
+        remaining_seconds = 0
+        if is_premium:
+            remaining_seconds = max(
+                0,
+                math.ceil((entitlement.expires_at - now).total_seconds()),
+            )
+
+        latest_purchase = (
+            PremiumPurchase.objects.filter(
+                user=request.user,
+                completed_at__isnull=False,
+            )
+            .order_by("-completed_at", "-pk")
+            .first()
+        )
+        can_request_refund = (
+            PremiumPurchase.objects.filter(
+                user=request.user,
+                status=PremiumPurchase.Status.COMPLETED,
+                revoked_at__isnull=True,
+                entitlement_expires_at__gt=now,
+                refund_request__isnull=True,
+            ).exists()
+        )
+
+        subscription_data = None
+        if latest_purchase is not None:
+            subscription_data = {
+                "purchaseId": latest_purchase.pk,
+                "productName": "맞춤형 행동 알림",
+                "status": latest_purchase.status,
+                "purchasedAt": latest_purchase.completed_at,
+                "startedAt": entitlement.started_at if entitlement else None,
+                "expiresAt": entitlement.expires_at if entitlement else None,
+                "isActive": is_premium,
+                "remainingSeconds": remaining_seconds,
+                "canRequestRefund": can_request_refund,
+            }
+
+        return Response({"subscription": subscription_data})
+
+
 class PremiumCheckoutView(APIView):
     permission_classes = [IsAuthenticated]
 
@@ -158,6 +212,98 @@ class PremiumCheckoutView(APIView):
                 "status": purchase.status,
             },
             status=status.HTTP_201_CREATED,
+        )
+
+
+class PremiumRefundRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        refund_request = (
+            PremiumRefundRequest.objects.filter(user=request.user)
+            .select_related("purchase")
+            .first()
+        )
+        if refund_request is None:
+            return Response(
+                {
+                    "detail": "환불 요청 내역이 없습니다.",
+                    "code": "REFUND_REQUEST_NOT_FOUND",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(PremiumRefundRequestSerializer(refund_request).data)
+
+    def post(self, request):
+        now = timezone.now()
+        purchase = (
+            PremiumPurchase.objects.filter(
+                user=request.user,
+                status=PremiumPurchase.Status.COMPLETED,
+                revoked_at__isnull=True,
+                entitlement_expires_at__gt=now,
+            )
+            .order_by("-completed_at", "-pk")
+            .first()
+        )
+        if purchase is None:
+            return self.no_refundable_purchase_response()
+
+        existing_request = PremiumRefundRequest.objects.filter(
+            purchase=purchase,
+        ).first()
+        if existing_request is not None:
+            return self.duplicate_request_response(existing_request)
+
+        serializer = PremiumRefundRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            with transaction.atomic():
+                purchase = PremiumPurchase.objects.select_for_update().get(
+                    pk=purchase.pk,
+                    user=request.user,
+                    status=PremiumPurchase.Status.COMPLETED,
+                    revoked_at__isnull=True,
+                    entitlement_expires_at__gt=timezone.now(),
+                )
+                refund_request = serializer.save(
+                    user=request.user,
+                    purchase=purchase,
+                )
+        except PremiumPurchase.DoesNotExist:
+            return self.no_refundable_purchase_response()
+        except IntegrityError:
+            existing_request = PremiumRefundRequest.objects.get(
+                purchase=purchase,
+            )
+            return self.duplicate_request_response(existing_request)
+
+        return Response(
+            PremiumRefundRequestSerializer(refund_request).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def no_refundable_purchase_response():
+        return Response(
+            {
+                "detail": "환불을 요청할 수 있는 프리미엄 결제 내역이 없습니다.",
+                "code": "NO_REFUNDABLE_PURCHASE",
+            },
+            status=status.HTTP_409_CONFLICT,
+        )
+
+    @staticmethod
+    def duplicate_request_response(refund_request):
+        return Response(
+            {
+                "detail": "이미 환불을 요청한 결제입니다.",
+                "code": "REFUND_REQUEST_ALREADY_EXISTS",
+                "refundRequest": PremiumRefundRequestSerializer(
+                    refund_request
+                ).data,
+            },
+            status=status.HTTP_409_CONFLICT,
         )
 
 

@@ -84,6 +84,53 @@ class PremiumPurchase(models.Model):
         return f"{self.user_id} - {self.paddle_transaction_id or self.pk}"
 
 
+class PremiumRefundRequest(models.Model):
+    """운영진이 계좌 송금으로 처리하는 프리미엄 수동 환불 요청."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "REQUESTED", "환불 요청"
+        PROCESSING = "PROCESSING", "환불 처리 중"
+        COMPLETED = "COMPLETED", "환불 완료"
+        REJECTED = "REJECTED", "환불 거절"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="premium_refund_requests",
+    )
+    purchase = models.OneToOneField(
+        PremiumPurchase,
+        on_delete=models.PROTECT,
+        related_name="refund_request",
+    )
+    bank_name = models.CharField(max_length=30)
+    account_number = models.CharField(max_length=30)
+    phone_number = models.CharField(max_length=20)
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.REQUESTED,
+    )
+    rejection_reason = models.CharField(max_length=255, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(
+                fields=["user", "status", "created_at"],
+                name="premium_refund_user_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.purchase_id} - {self.status}"
+
+
 class PaddleWebhookEvent(models.Model):
     """event_id를 PK로 사용해 Paddle의 at-least-once 전송을 멱등 처리한다."""
 
