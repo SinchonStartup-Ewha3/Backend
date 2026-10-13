@@ -1,5 +1,104 @@
 from django.conf import settings
 from django.db import models
+from django.utils import timezone
+
+
+class PremiumEntitlement(models.Model):
+    """Webhook으로 확정된 사용자의 현재 프리미엄 이용 기간."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="premium_entitlement",
+    )
+    started_at = models.DateTimeField(null=True, blank=True)
+    expires_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    def is_active(self, at=None):
+        at = at or timezone.now()
+        return bool(
+            self.started_at
+            and self.expires_at
+            and self.started_at <= at < self.expires_at
+        )
+
+    def __str__(self):
+        return f"{self.user_id}: {self.started_at} ~ {self.expires_at}"
+
+
+class PremiumPurchase(models.Model):
+    """WEE Premium Paddle 거래와 권한 지급/회수 이력."""
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "결제 대기"
+        COMPLETED = "COMPLETED", "결제 완료"
+        FAILED = "FAILED", "결제 실패"
+        CANCELED = "CANCELED", "결제 취소"
+        PARTIALLY_REFUNDED = "PARTIALLY_REFUNDED", "부분 환불"
+        REFUNDED = "REFUNDED", "전액 환불"
+        CHARGEBACK = "CHARGEBACK", "차지백"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="premium_purchases",
+    )
+    paddle_transaction_id = models.CharField(
+        max_length=50,
+        unique=True,
+        null=True,
+        blank=True,
+    )
+    paddle_customer_id = models.CharField(max_length=50, blank=True)
+    paddle_product_id = models.CharField(max_length=50, blank=True)
+    paddle_price_id = models.CharField(max_length=50)
+    paddle_adjustment_id = models.CharField(max_length=50, blank=True)
+    amount = models.PositiveIntegerField()
+    currency_code = models.CharField(max_length=3)
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    entitlement_started_at = models.DateTimeField(null=True, blank=True)
+    entitlement_expires_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    revoked_at = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["user", "status", "created_at"],
+                name="premium_purchase_user_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.paddle_transaction_id or self.pk}"
+
+
+class PaddleWebhookEvent(models.Model):
+    """event_id를 PK로 사용해 Paddle의 at-least-once 전송을 멱등 처리한다."""
+
+    event_id = models.CharField(max_length=50, primary_key=True)
+    notification_id = models.CharField(max_length=50, blank=True)
+    event_type = models.CharField(max_length=100)
+    occurred_at = models.DateTimeField()
+    payload = models.JSONField()
+    processed_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-occurred_at"]
+
+    def __str__(self):
+        return f"{self.event_type}: {self.event_id}"
 
 
 class PremiumProfile(models.Model):

@@ -21,7 +21,7 @@ from core.models import Region
 from situations.services.laundry import build_laundry_info
 
 from home.services.life_info import get_outfit
-from premium.models import NotificationPreference, PremiumProfile
+from premium.models import NotificationPreference, PremiumEntitlement, PremiumProfile
 from situations.services.notification_recommendations import (
     build_laundry_message,
     build_outerwear_message,
@@ -760,6 +760,11 @@ class DailyNotificationPreferenceSchedulerTests(APITestCase):
             cold_sensitivity=PremiumProfile.ColdSensitivity.NORMAL,
             exercise_preference=PremiumProfile.ExercisePreference.MORNING,
             survey_completed_at=FIXED_NOW,
+        )
+        PremiumEntitlement.objects.create(
+            user=self.user,
+            started_at=FIXED_NOW - timedelta(days=1),
+            expires_at=FIXED_NOW + timedelta(days=20),
         )
 
     @override_settings(
