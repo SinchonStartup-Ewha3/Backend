@@ -26,7 +26,11 @@ from .serializers import (
 )
 
 from .services.coupons import CouponError, redeem_coupon
-from .services.generator import get_or_create_fortune_result
+from .services.generator import (
+    get_or_create_fortune_result,
+    is_legacy_result,
+    refresh_legacy_result,
+)
 from .services.payments import (
     PaymentConfirmationError,
     PaymentGatewayNotConfigured,
@@ -252,11 +256,18 @@ class PurchaseFortuneResultListView(generics.ListAPIView):
             payment_status=FortunePurchase.PaymentStatus.PAID,
         )
 
-        return FortuneResult.objects.filter(
-            user=self.request.user,
-            target_date__gte=purchase.active_from,
-            target_date__lte=min(today, purchase.active_until),
+        results = list(
+            FortuneResult.objects.filter(
+                user=self.request.user,
+                target_date__gte=purchase.active_from,
+                target_date__lte=min(today, purchase.active_until),
+            )
         )
+        # 예전 임시 결과는 새 로직으로 다시 계산한다. 지난 날짜라 날씨는 넣지 않는다.
+        for result in results:
+            if is_legacy_result(result):
+                refresh_legacy_result(result, profile=purchase)
+        return results
 
     def get_serializer_context(self):
         context = super().get_serializer_context()

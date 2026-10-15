@@ -8,7 +8,6 @@ from .models import (
     FortuneResult,
 )
 from .services.calender import convert_to_solar_date
-from .services.calender import convert_to_solar_date
 from .services.generator import WEATHER_LABELS
 from .services.saju import LuckLevel
 
