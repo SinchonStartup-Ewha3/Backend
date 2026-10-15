@@ -1,4 +1,5 @@
 """마이페이지 결제 관리: 내 운세 이용권(앱 결제 + 쿠폰 코드) 현황."""
+from django.utils import timezone
 from fortune.models import FortunePurchase
 
 SOURCE_COUPON = "COUPON"
@@ -28,7 +29,9 @@ def _serialize(purchase, today) -> dict:
         "active_from": purchase.active_from,
         "active_until": purchase.active_until,
         "remaining_days": _remaining_days(purchase, today),
-        "purchased_at": purchase.purchased_at,
+        "purchased_at": (
+            timezone.localtime(purchase.purchased_at) if purchase.purchased_at else None
+        ),
     }
 
 
