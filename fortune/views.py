@@ -36,6 +36,7 @@ from .services.payments import (
     PaymentGatewayNotConfigured,
     confirm_payment,
 )
+from .services.passes import build_my_passes
 
 
 class FortuneProfileView(APIView):
@@ -293,3 +294,11 @@ class FortuneCouponRedeemView(APIView):
             FortunePurchaseSerializer(purchase).data,
             status=status.HTTP_201_CREATED,
         )
+
+class MyFortunePassView(APIView):
+    """마이페이지 결제 관리: 내 운세 이용권 현황 (앱 결제 + 쿠폰 코드)"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_my_passes(request.user, timezone.localdate()))

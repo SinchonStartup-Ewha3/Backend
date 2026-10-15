@@ -8,6 +8,7 @@ from .views import (
     PurchaseFortuneResultListView,
     TodayFortuneResultView,
     FortuneCouponRedeemView,
+    MyFortunePassView,
 )
 
 
@@ -26,6 +27,11 @@ urlpatterns = [
         "products/",
         FortuneProductListView.as_view(),
         name="fortune-product-list",
+    ),
+        path(
+        "purchases/me/",
+        MyFortunePassView.as_view(),
+        name="fortune-my-passes",
     ),
     path(
         "purchases/",
