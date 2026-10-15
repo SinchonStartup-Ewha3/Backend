@@ -5,6 +5,7 @@ from .models import (
     FortuneProfile,
     FortunePurchase,
     FortuneResult,
+    FortuneCoupon,
 )
 
 
@@ -54,3 +55,18 @@ class FortuneResultAdmin(admin.ModelAdmin):
     list_display = ("id", "user", "target_date", "title")
     list_filter = ("target_date",)
     search_fields = ("user__nickname", "title")
+
+@admin.register(FortuneCoupon)
+class FortuneCouponAdmin(admin.ModelAdmin):
+    list_display = (
+        "code",
+        "product",
+        "batch_label",
+        "is_active",
+        "expires_on",
+        "redeemed_by",
+        "redeemed_at",
+    )
+    list_filter = ("product", "batch_label", "is_active")
+    search_fields = ("code", "redeemed_by__nickname")
+    readonly_fields = ("redeemed_by", "redeemed_at", "purchase", "created_at")

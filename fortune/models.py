@@ -206,3 +206,39 @@ class FortuneResult(models.Model):
 
     def __str__(self):
         return f"{self.target_date} - {self.title}"
+
+class FortuneCoupon(models.Model):
+    """굿즈(테루테루 카드)에 인쇄된 운세 이용권 코드. 한 코드는 한 번만 쓸 수 있다."""
+
+    code = models.CharField(max_length=20, unique=True)
+    product = models.ForeignKey(
+        FortuneProduct,
+        on_delete=models.PROTECT,
+        related_name="coupons",
+    )
+    batch_label = models.CharField(max_length=50, blank=True)  # 발급 묶음 이름 (예: 10월 축제)
+    expires_on = models.DateField(null=True, blank=True)  # 비어 있으면 무기한
+    is_active = models.BooleanField(default=True)  # 분실·회수 시 운영진이 끈다
+
+    redeemed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fortune_coupons",
+    )
+    redeemed_at = models.DateTimeField(null=True, blank=True)
+    purchase = models.OneToOneField(
+        FortunePurchase,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="coupon",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.code} ({self.product.product_code})"

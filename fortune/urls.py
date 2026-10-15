@@ -7,10 +7,16 @@ from .views import (
     FortunePurchaseCreateView,
     PurchaseFortuneResultListView,
     TodayFortuneResultView,
+    FortuneCouponRedeemView,
 )
 
 
 urlpatterns = [
+    path(
+        "coupons/redeem/",
+        FortuneCouponRedeemView.as_view(),
+        name="fortune-coupon-redeem",
+    ),
     path(
         "profile/",
         FortuneProfileView.as_view(),

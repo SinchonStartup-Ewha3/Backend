@@ -22,7 +22,10 @@ from .serializers import (
     FortunePurchaseCreateSerializer,
     FortunePurchaseSerializer,
     FortuneResultSerializer,
+    FortuneCouponRedeemSerializer
 )
+
+from .services.coupons import CouponError, redeem_coupon
 from .services.generator import get_or_create_fortune_result
 from .services.payments import (
     PaymentConfirmationError,
@@ -259,3 +262,23 @@ class PurchaseFortuneResultListView(generics.ListAPIView):
         context = super().get_serializer_context()
         context["can_view_detail"] = True
         return context
+
+class FortuneCouponRedeemView(APIView):
+    """굿즈 카드의 코드를 입력해 운세 이용권을 받는다."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = FortuneCouponRedeemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            purchase = redeem_coupon(request.user, serializer.validated_data["code"])
+        except CouponError as error:
+            return Response(
+                {"detail": error.message, "code": error.code},
+                status=error.status,
+            )
+        return Response(
+            FortunePurchaseSerializer(purchase).data,
+            status=status.HTTP_201_CREATED,
+        )
