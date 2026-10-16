@@ -40,12 +40,13 @@ logger = logging.getLogger(__name__)
 class PremiumProfileView(APIView):
     permission_classes = [IsAuthenticated, HasActivePremium]
 
-    def get_profile(self, user):
-        profile, _ = PremiumProfile.objects.get_or_create(user=user)
-        return profile
-
     def get(self, request):
-        profile = self.get_profile(request.user)
+        profile = PremiumProfile.objects.filter(
+            user=request.user,
+        ).first()
+        if profile is None:
+            profile = PremiumProfile(user=request.user)
+
         return Response(PremiumProfileSerializer(profile).data)
 
     def put(self, request):
@@ -55,7 +56,9 @@ class PremiumProfileView(APIView):
         return self.update_profile(request, partial=True)
 
     def update_profile(self, request, partial=False):
-        profile = self.get_profile(request.user)
+        profile, _ = PremiumProfile.objects.get_or_create(
+            user=request.user,
+        )
         serializer = PremiumProfileSerializer(
             profile,
             data=request.data,
@@ -70,14 +73,13 @@ class PremiumProfileView(APIView):
 class NotificationPreferenceView(APIView):
     permission_classes = [IsAuthenticated, HasActivePremium]
 
-    def get_preference(self, user):
-        preference, _ = NotificationPreference.objects.get_or_create(
-            user=user,
-        )
-        return preference
-
     def get(self, request):
-        preference = self.get_preference(request.user)
+        preference = NotificationPreference.objects.filter(
+            user=request.user,
+        ).first()
+        if preference is None:
+            preference = NotificationPreference(user=request.user)
+
         return Response(NotificationPreferenceSerializer(preference).data)
 
     def put(self, request):
@@ -87,7 +89,9 @@ class NotificationPreferenceView(APIView):
         return self.update_preference(request, partial=True)
 
     def update_preference(self, request, partial=False):
-        preference = self.get_preference(request.user)
+        preference, _ = NotificationPreference.objects.get_or_create(
+            user=request.user,
+        )
         serializer = NotificationPreferenceSerializer(
             preference,
             data=request.data,

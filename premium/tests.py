@@ -30,7 +30,7 @@ class PremiumProfileAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_get_returns_default_incomplete_profile(self):
+    def test_get_returns_default_without_creating_profile(self):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -42,7 +42,9 @@ class PremiumProfileAPITests(APITestCase):
         )
         self.assertFalse(response.data["isCompleted"])
         self.assertIsNone(response.data["surveyCompletedAt"])
-        self.assertTrue(PremiumProfile.objects.filter(user=self.user).exists())
+        self.assertFalse(
+            PremiumProfile.objects.filter(user=self.user).exists()
+        )
 
     def test_put_saves_all_personalization_preferences(self):
         response = self.client.put(
@@ -193,7 +195,7 @@ class NotificationPreferenceAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_get_returns_opt_in_defaults(self):
+    def test_get_returns_defaults_without_creating_preference(self):
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
@@ -205,7 +207,7 @@ class NotificationPreferenceAPITests(APITestCase):
                 "laundryEnabled": False,
             },
         )
-        self.assertTrue(
+        self.assertFalse(
             NotificationPreference.objects.filter(user=self.user).exists()
         )
 
