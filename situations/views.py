@@ -20,13 +20,20 @@ from .services.running import build_running_info
 from .services.uv import get_uv_forecast
 from .services.hydration import build_hydration_summary
 
+from premium.permissions import HasActivePremium
+
 from datetime import datetime
 
 from django.shortcuts import get_object_or_404
 
-class NotificationScheduleListCreateView(generics.ListCreateAPIView):
+class NotificationScheduleListCreateView(
+    generics.ListCreateAPIView
+):
     serializer_class = NotificationScheduleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [
+        IsAuthenticated,
+        HasActivePremium,
+    ]
 
     def get_queryset(self):
         return NotificationSchedule.objects.filter(
@@ -41,7 +48,10 @@ class NotificationScheduleDetailView(
     generics.RetrieveUpdateDestroyAPIView
 ):
     serializer_class = NotificationScheduleSerializer
-    permission_classes = [IsAuthenticated]
+    permission_classes = [
+        IsAuthenticated,
+        HasActivePremium,
+    ]
     lookup_url_kwarg = "schedule_id"
 
     def get_queryset(self):
