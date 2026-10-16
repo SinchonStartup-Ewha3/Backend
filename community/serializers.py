@@ -55,11 +55,7 @@ class PostSerializer(serializers.ModelSerializer):
     tagLabel = serializers.CharField(source="get_tag_display", read_only=True)
 
 
-    image = serializers.ImageField(
-        required=False,
-        allow_null=True,
-        write_only=True,
-    )
+
     imageUrl = serializers.SerializerMethodField()
 
     image = serializers.ImageField(
@@ -92,6 +88,7 @@ class PostSerializer(serializers.ModelSerializer):
             "tagLabel",
             "image",
             "imageUrl",
+            "removeImage",
             "region",
             "locationMode",
             "lat",
@@ -101,9 +98,6 @@ class PostSerializer(serializers.ModelSerializer):
             "modifiedAt",
             "likeCount",
             "isLiked",
-            "image",
-            "removeImage",
-            "imageUrl",
         ]
         read_only_fields = [
             "postId",
@@ -231,7 +225,7 @@ class PostSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         user = request.user
 
-        remove_image = validated_data.pop("removeImage", False)
+        validated_data.pop("removeImage", False)
 
         location_mode = validated_data.pop("locationMode", "SAVED")
         
@@ -307,3 +301,4 @@ class PostSerializer(serializers.ModelSerializer):
                 )
 
         return instance
+    

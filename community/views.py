@@ -232,3 +232,4 @@ class CommunityWeatherCopyView(APIView):
             "region": region_data,
             **copy_data,
         })
+    

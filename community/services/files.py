@@ -22,3 +22,4 @@ def delete_storage_file_on_commit(*, storage, name):
             )
 
     transaction.on_commit(delete_file)
+    
