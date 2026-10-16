@@ -543,6 +543,25 @@ class NotificationScheduleAPITests(APITestCase):
         self.assertEqual(schedule.user, self.user)
         self.assertEqual(schedule.weekdays, [0, 2, 4])
 
+    def test_create_requires_purpose(self):
+        response = self.client.post(
+            reverse("situations:schedule-list-create"),
+            {
+                "name": "목적 없는 일정",
+                "weekdays": [0, 2, 4],
+                "outingTime": "08:30",
+                "regionCode": self.region.region_code,
+                "leadMinutes": 30,
+            },
+            format="json",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertIn("purpose", response.data)
+
     def test_patch_updates_schedule(self):
         schedule = self.create_schedule()
 
