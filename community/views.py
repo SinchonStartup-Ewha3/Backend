@@ -1,4 +1,5 @@
 from django.db.models import Count, Exists, OuterRef
+from django.db import transaction
 from django.shortcuts import get_object_or_404
 from rest_framework import generics
 from rest_framework.exceptions import ValidationError
@@ -11,6 +12,7 @@ from .models import Post, PostLike
 from .pagination import PostPagination
 from .permissions import IsPostAuthorOrReadOnly
 from .serializers import PostSerializer
+from .services.files import delete_storage_file_on_commit
 
 from core.serializers import RegionSerializer
 from home.services.kma_client import KmaApiError
@@ -107,8 +109,15 @@ class PostUpdateView(generics.RetrieveUpdateDestroyAPIView):
     """작성자 본인에게만 게시물 상세 조회·수정·삭제를 제공한다."""
 
     serializer_class = PostSerializer
-    permission_classes = [IsAuthenticated, IsPostAuthorOrReadOnly]
-    parser_classes = [MultiPartParser, FormParser, JSONParser]
+    permission_classes = [
+        IsAuthenticated,
+        IsPostAuthorOrReadOnly,
+    ]
+    parser_classes = [
+        MultiPartParser,
+        FormParser,
+        JSONParser,
+    ]
     lookup_url_kwarg = "post_id"
 
     def get_queryset(self):
@@ -117,6 +126,27 @@ class PostUpdateView(generics.RetrieveUpdateDestroyAPIView):
             "region",
         ).filter(user=self.request.user)
 
+    def perform_destroy(self, instance):
+        image_name = (
+            instance.image.name
+            if instance.image
+            else None
+        )
+        image_storage = (
+            instance.image.storage
+            if instance.image
+            else None
+        )
+
+        with transaction.atomic():
+            super().perform_destroy(instance)
+
+            if image_storage and image_name:
+                delete_storage_file_on_commit(
+                    storage=image_storage,
+                    name=image_name,
+                )
+
 
 class PostLikeToggleView(APIView):
     """좋아요를 누르면 추가하고, 다시 누르면 취소한다."""
@@ -124,22 +154,36 @@ class PostLikeToggleView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request, post_id):
-        post = get_object_or_404(Post, pk=post_id)
-        like, created = PostLike.objects.get_or_create(
-            post=post,
-            user=request.user,
-        )
+        with transaction.atomic():
+            # 같은 게시글의 좋아요 요청을 순차 처리한다.
+            post = get_object_or_404(
+                Post.objects.select_for_update(),
+                pk=post_id,
+            )
 
-        if created:
-            is_liked = True
-        else:
-            like.delete()
-            is_liked = False
+            like = PostLike.objects.filter(
+                post=post,
+                user=request.user,
+            ).first()
+
+            if like is None:
+                PostLike.objects.create(
+                    post=post,
+                    user=request.user,
+                )
+                is_liked = True
+            else:
+                like.delete()
+                is_liked = False
+
+            like_count = PostLike.objects.filter(
+                post=post,
+            ).count()
 
         return Response({
             "postId": post.pk,
             "isLiked": is_liked,
-            "likeCount": post.likes.count(),
+            "likeCount": like_count,
         })
 
 class CommunityWeatherCopyView(APIView):
