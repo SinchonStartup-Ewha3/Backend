@@ -22,13 +22,21 @@ from .serializers import (
     FortunePurchaseCreateSerializer,
     FortunePurchaseSerializer,
     FortuneResultSerializer,
+    FortuneCouponRedeemSerializer
 )
-from .services.generator import get_or_create_fortune_result
+
+from .services.coupons import CouponError, redeem_coupon
+from .services.generator import (
+    get_or_create_fortune_result,
+    is_legacy_result,
+    refresh_legacy_result,
+)
 from .services.payments import (
     PaymentConfirmationError,
     PaymentGatewayNotConfigured,
     confirm_payment,
 )
+from .services.passes import build_my_passes
 
 
 class FortuneProfileView(APIView):
@@ -249,13 +257,48 @@ class PurchaseFortuneResultListView(generics.ListAPIView):
             payment_status=FortunePurchase.PaymentStatus.PAID,
         )
 
-        return FortuneResult.objects.filter(
-            user=self.request.user,
-            target_date__gte=purchase.active_from,
-            target_date__lte=min(today, purchase.active_until),
+        results = list(
+            FortuneResult.objects.filter(
+                user=self.request.user,
+                target_date__gte=purchase.active_from,
+                target_date__lte=min(today, purchase.active_until),
+            )
         )
+        # 예전 임시 결과는 새 로직으로 다시 계산한다. 지난 날짜라 날씨는 넣지 않는다.
+        for result in results:
+            if is_legacy_result(result):
+                refresh_legacy_result(result, profile=purchase)
+        return results
 
     def get_serializer_context(self):
         context = super().get_serializer_context()
         context["can_view_detail"] = True
         return context
+
+class FortuneCouponRedeemView(APIView):
+    """굿즈 카드의 코드를 입력해 운세 이용권을 받는다."""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = FortuneCouponRedeemSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            purchase = redeem_coupon(request.user, serializer.validated_data["code"])
+        except CouponError as error:
+            return Response(
+                {"detail": error.message, "code": error.code},
+                status=error.status,
+            )
+        return Response(
+            FortunePurchaseSerializer(purchase).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+class MyFortunePassView(APIView):
+    """마이페이지 결제 관리: 내 운세 이용권 현황 (앱 결제 + 쿠폰 코드)"""
+
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        return Response(build_my_passes(request.user, timezone.localdate()))

@@ -110,3 +110,67 @@ class TodayFortuneAPITests(APITestCase):
 
         self.assertEqual(mock_weather.call_count, 1)
         self.assertEqual(FortuneResult.objects.filter(user=self.user).count(), 1)
+
+class LegacyResultTests(APITestCase):
+    """새 로직 이전에 만들어진 임시 결과(요약 비어 있음)는 조회 시 다시 계산한다."""
+
+    def setUp(self):
+        self.user = User.objects.create_user(nickname="예전결과")
+        self.profile = FortuneProfile.objects.create(
+            user=self.user, calendar_type="SOLAR",
+            birth_date="2002-05-17", converted_solar_date=date(2002, 5, 17),
+            birth_time_unknown=True,
+        )
+        self.client.force_authenticate(self.user)
+
+    def make_legacy(self, target_date):
+        # 마이그레이션 직후 기존 행의 모습
+        return FortuneResult.objects.create(
+            user=self.user, target_date=target_date,
+            title="임시 운세", lucky_color="하늘색", lucky_item="손수건",
+            lucky_place="햇빛이 잘 드는 카페", detail_text="임시 풀이",
+        )
+
+    def test_today_legacy_result_is_recalculated(self):
+        from django.utils import timezone
+
+        legacy = self.make_legacy(timezone.localdate())
+
+        res = self.client.get(reverse("today-fortune-result"))
+
+        self.assertEqual(res.data["id"], legacy.id)  # 새 행을 만들지 않고 덮어쓴다
+        self.assertTrue(res.data["summary"])
+        self.assertNotEqual(res.data["title"], "임시 운세")
+        self.assertEqual(FortuneResult.objects.filter(user=self.user).count(), 1)
+
+    def test_new_result_is_not_recalculated(self):
+        result = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
+        FortuneResult.objects.filter(pk=result.pk).update(lucky_color="고정값")
+
+        again = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
+
+        self.assertEqual(again.lucky_color, "고정값")
+
+    def test_purchase_result_list_recalculates_past_legacy_results(self):
+        from datetime import timedelta
+
+        from django.utils import timezone
+
+        from fortune.models import FortuneProduct, FortunePurchase
+
+        today = timezone.localdate()
+        product = FortuneProduct.objects.get(product_code="FORTUNE_7D")
+        purchase = FortunePurchase.objects.create(
+            user=self.user, product=product, product_title=product.title,
+            duration_days=7, amount=product.price, calendar_type="SOLAR",
+            birth_date=date(2002, 5, 17), converted_solar_date=date(2002, 5, 17),
+            birth_time_unknown=True, payment_status=FortunePurchase.PaymentStatus.PAID,
+            active_from=today - timedelta(days=1), active_until=today + timedelta(days=5),
+        )
+        self.make_legacy(today - timedelta(days=1))
+
+        res = self.client.get(reverse("fortune-result-list", args=[purchase.id]))
+
+        self.assertEqual(len(res.data), 1)
+        self.assertTrue(res.data[0]["summary"])
+        self.assertIsNone(res.data[0]["weather_condition"])  # 지난 날짜는 날씨 없이

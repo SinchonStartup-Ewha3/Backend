@@ -132,16 +132,41 @@ def build_fortune_result(*, user, profile, target_date, weather=None):
     }
 
 
+def is_legacy_result(result) -> bool:
+    """새 생성 로직 이전에 만든 임시 결과인지 (요약 문구가 비어 있음)"""
+    return not result.summary
+
+
+def refresh_legacy_result(result, *, profile, weather=None):
+    """예전 임시 결과를 새 로직으로 다시 계산해 덮어쓴다."""
+    data = build_fortune_result(
+        user=result.user,
+        profile=profile,
+        target_date=result.target_date,
+        weather=weather,
+    )
+    for field, value in data.items():
+        setattr(result, field, value)
+    result.save(update_fields=list(data))
+    return result
+
+
 def get_or_create_fortune_result(*, user, target_date, profile=None):
     """무료 요약과 결제 후 상세풀이가 공유하는 날짜별 결과를 반환합니다.
 
     하루에 한 번만 만들어 저장하므로, 처음 조회한 시점의 날씨로 고정된다.
+    새 로직 이전에 만든 임시 결과가 있으면 다시 계산한다.
     """
     existing = FortuneResult.objects.filter(user=user, target_date=target_date).first()
-    if existing is not None:
+    if existing is not None and not is_legacy_result(existing):
         return existing
 
     profile = profile or user.fortune_profile
+    if existing is not None:
+        return refresh_legacy_result(
+            existing, profile=profile, weather=get_today_weather(user),
+        )
+
     result, _ = FortuneResult.objects.get_or_create(
         user=user,
         target_date=target_date,

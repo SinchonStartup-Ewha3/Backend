@@ -8,7 +8,6 @@ from .models import (
     FortuneResult,
 )
 from .services.calender import convert_to_solar_date
-from .services.calender import convert_to_solar_date
 from .services.generator import WEATHER_LABELS
 from .services.saju import LuckLevel
 
@@ -216,3 +215,6 @@ class FortuneResultSerializer(serializers.ModelSerializer):
             "detail_text",
             "detail_locked",
         ]
+
+class FortuneCouponRedeemSerializer(serializers.Serializer):
+    code = serializers.CharField(max_length=30)

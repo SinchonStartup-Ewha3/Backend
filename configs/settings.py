@@ -164,6 +164,11 @@ REST_FRAMEWORK = {
     ),
 }
 
+# 굿즈 카드 운세 코드
+FORTUNE_COUPON_CODE_LENGTH = env.int("FORTUNE_COUPON_CODE_LENGTH", default=6)
+# 이용 중인 이용권이 있을 때 코드 등록: EXTEND(남은 기간 뒤에 이어 붙이기) / BLOCK(막기)
+FORTUNE_COUPON_STACK_POLICY = env("FORTUNE_COUPON_STACK_POLICY", default="EXTEND")
+
 SIMPLE_JWT = {
     "ACCESS_TOKEN_LIFETIME": timedelta(hours=1),
     "REFRESH_TOKEN_LIFETIME": timedelta(days=14),
