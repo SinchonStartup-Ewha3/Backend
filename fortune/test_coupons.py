@@ -1,18 +1,25 @@
 import csv
 import os
 import tempfile
+from unittest.mock import patch
 from datetime import timedelta
 
 from django.contrib.auth import get_user_model
-from django.core.cache import cache
 from django.core.management import call_command
+from django.db.models.query import QuerySet
 from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from fortune.models import FortuneCoupon, FortuneProduct, FortuneProfile, FortunePurchase
+from fortune.models import (
+    FortuneCoupon,
+    FortuneCouponAttempt,
+    FortuneProduct,
+    FortuneProfile,
+    FortunePurchase,
+)
 from fortune.services.coupons import CODE_ALPHABET, MAX_FAILED_ATTEMPTS
 
 User = get_user_model()
@@ -25,7 +32,6 @@ def get_product(code="FORTUNE_7D"):
 
 class CouponRedeemAPITests(APITestCase):
     def setUp(self):
-        cache.clear()
         self.user = User.objects.create_user(nickname="쿠폰유저")
         FortuneProfile.objects.create(
             user=self.user, calendar_type="SOLAR",
@@ -130,6 +136,63 @@ class CouponRedeemAPITests(APITestCase):
         self.assertEqual(res.status_code, status.HTTP_429_TOO_MANY_REQUESTS)
         self.assertEqual(res.data["code"], "COUPON_TOO_MANY_ATTEMPTS")
         self.assertIsNone(FortuneCoupon.objects.get(code="K7QM").redeemed_at)
+        # 잠금은 DB에 저장된다 (worker가 여러 개여도 같은 값을 본다)
+        attempt = FortuneCouponAttempt.objects.get(user=self.user)
+        self.assertGreater(attempt.locked_until, timezone.now())
+
+    def test_failures_below_limit_are_counted_in_db(self):
+        self.redeem("ZZZZ")
+        self.redeem("YYYY")
+        attempt = FortuneCouponAttempt.objects.get(user=self.user)
+        self.assertEqual(attempt.failed_count, 2)
+        self.assertIsNone(attempt.locked_until)
+
+    def test_lock_expires(self):
+        FortuneCouponAttempt.objects.create(
+            user=self.user, locked_until=timezone.now() - timedelta(seconds=1),
+        )
+        res = self.redeem("K7QM")
+        self.assertEqual(res.status_code, status.HTTP_201_CREATED)
+
+    def test_success_resets_failures(self):
+        self.redeem("ZZZZ")
+        self.redeem("YYYY")
+
+        self.redeem("K7QM")
+
+        attempt = FortuneCouponAttempt.objects.get(user=self.user)
+        self.assertEqual(attempt.failed_count, 0)
+        self.assertIsNone(attempt.locked_until)
+
+    def test_profile_required_is_not_counted(self):
+        FortuneProfile.objects.filter(user=self.user).delete()
+        self.redeem("K7QM")
+        self.assertEqual(FortuneCouponAttempt.objects.get(user=self.user).failed_count, 0)
+
+    def test_attempts_during_lock_do_not_extend_it(self):
+        locked_until = timezone.now() + timedelta(minutes=10)
+        FortuneCouponAttempt.objects.create(user=self.user, locked_until=locked_until)
+
+        self.redeem("ZZZZ")
+
+        attempt = FortuneCouponAttempt.objects.get(user=self.user)
+        self.assertEqual(attempt.locked_until, locked_until)
+        self.assertEqual(attempt.failed_count, 0)
+
+    def test_user_row_is_locked_before_checking_passes(self):
+        """같은 사용자의 동시 등록이 순서대로 처리되도록 사용자 행을 먼저 잠근다."""
+        original = QuerySet.select_for_update
+        locked_models = []
+
+        def spy(queryset, *args, **kwargs):
+            locked_models.append(queryset.model)
+            return original(queryset, *args, **kwargs)
+
+        with patch.object(QuerySet, "select_for_update", autospec=True, side_effect=spy):
+            self.redeem("K7QM")
+
+        self.assertEqual(locked_models[0], User)  # 가장 먼저 사용자 행을 잠근다
+        self.assertIn(FortunePurchase, locked_models)
 
     def test_login_required(self):
         self.client.force_authenticate(user=None)

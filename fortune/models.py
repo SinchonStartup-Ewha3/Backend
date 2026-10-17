@@ -242,3 +242,18 @@ class FortuneCoupon(models.Model):
 
     def __str__(self):
         return f"{self.code} ({self.product.product_code})"
+
+class FortuneCouponAttempt(models.Model):
+    """쿠폰 코드 입력 실패 횟수와 입력 제한 종료 시각 (사용자별)."""
+
+    user = models.OneToOneField(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="fortune_coupon_attempt",
+    )
+    failed_count = models.PositiveSmallIntegerField(default=0)
+    locked_until = models.DateTimeField(null=True, blank=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.user_id} - 실패 {self.failed_count}회"
