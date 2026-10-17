@@ -14,7 +14,12 @@ from django.utils import timezone
 from rest_framework import status
 from rest_framework.test import APITestCase
 
-from .models import PaddleWebhookEvent, PremiumEntitlement, PremiumPurchase
+from .models import (
+    PaddleWebhookEvent,
+    PremiumEntitlement,
+    PremiumPurchase,
+    PremiumRefundRequest,
+)
 from .services.paddle import (
     PaddleWebhookSignatureError,
     create_transaction,
@@ -327,6 +332,100 @@ class PaddleWebhookTests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(self.purchase.status, PremiumPurchase.Status.REFUNDED)
         self.assertFalse(entitlement.is_active())
+
+    def test_approved_prorated_refund_completes_request_and_revokes_unused_period(self):
+        self.post_payload(self.payload())
+        refund_request = PremiumRefundRequest.objects.create(
+            user=self.user,
+            purchase=self.purchase,
+            reason="남은 기간 환불",
+            requested_amount=2000,
+            currency_code="KRW",
+            remaining_seconds=18 * 24 * 60 * 60,
+        )
+        adjustment = {
+            "event_id": "evt_partial_refund",
+            "event_type": "adjustment.created",
+            "notification_id": "ntf_partial_refund",
+            "occurred_at": timezone.now().isoformat(),
+            "data": {
+                "id": "adj_partial_refund",
+                "transaction_id": "txn_wee_1",
+                "action": "refund",
+                "status": "approved",
+                "type": "partial",
+                "totals": {"total": "2000"},
+            },
+        }
+
+        response = self.post_payload(adjustment)
+
+        self.purchase.refresh_from_db()
+        refund_request.refresh_from_db()
+        entitlement = PremiumEntitlement.objects.get(user=self.user)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(
+            self.purchase.status,
+            PremiumPurchase.Status.PARTIALLY_REFUNDED,
+        )
+        self.assertEqual(
+            refund_request.status,
+            PremiumRefundRequest.Status.COMPLETED,
+        )
+        self.assertEqual(
+            refund_request.paddle_adjustment_id,
+            "adj_partial_refund",
+        )
+        self.assertIsNotNone(refund_request.completed_at)
+        self.assertFalse(entitlement.is_active())
+
+    def test_pending_then_rejected_refund_updates_request_without_revoking(self):
+        self.post_payload(self.payload())
+        refund_request = PremiumRefundRequest.objects.create(
+            user=self.user,
+            purchase=self.purchase,
+            reason="남은 기간 환불",
+            requested_amount=2000,
+            currency_code="KRW",
+            remaining_seconds=18 * 24 * 60 * 60,
+        )
+        adjustment = {
+            "event_id": "evt_pending_refund",
+            "event_type": "adjustment.created",
+            "notification_id": "ntf_pending_refund",
+            "occurred_at": timezone.now().isoformat(),
+            "data": {
+                "id": "adj_pending_refund",
+                "transaction_id": "txn_wee_1",
+                "action": "refund",
+                "status": "pending_approval",
+                "type": "partial",
+                "totals": {"total": "2000"},
+            },
+        }
+
+        self.post_payload(adjustment)
+        refund_request.refresh_from_db()
+        self.assertEqual(
+            refund_request.status,
+            PremiumRefundRequest.Status.PROCESSING,
+        )
+
+        adjustment["event_id"] = "evt_rejected_refund"
+        adjustment["notification_id"] = "ntf_rejected_refund"
+        adjustment["event_type"] = "adjustment.updated"
+        adjustment["data"]["status"] = "rejected"
+        self.post_payload(adjustment)
+
+        self.purchase.refresh_from_db()
+        refund_request.refresh_from_db()
+        entitlement = PremiumEntitlement.objects.get(user=self.user)
+        self.assertEqual(self.purchase.status, PremiumPurchase.Status.COMPLETED)
+        self.assertEqual(
+            refund_request.status,
+            PremiumRefundRequest.Status.REJECTED,
+        )
+        self.assertTrue(entitlement.is_active())
 
     def test_refund_delivered_before_completed_event_never_grants(self):
         adjustment = {

@@ -5,6 +5,7 @@
 - `POST /api/premium/checkout/` (JWT 필요): 서버의 `PADDLE_PRICE_ID`로 Paddle 거래를 만들고 `transactionId`를 반환합니다.
 - `POST /api/premium/webhooks/paddle/` (Paddle 전용): 원문 body와 `Paddle-Signature`를 검증한 뒤 이벤트를 처리합니다.
 - `GET /api/premium/status/` (JWT 필요): 현재 프리미엄 활성 여부와 시작/만료 시각을 반환합니다.
+- `GET|POST /api/premium/refund-requests/` (JWT 필요): 환불 요청을 조회하거나 생성합니다. 생성 시 계좌 정보 대신 환불 사유를 받고, 요청 시점의 미사용 기간 비율로 환불 예정 금액을 계산합니다.
 - `GET|PUT|PATCH /api/premium/profile/`, `GET|PUT|PATCH /api/premium/notification-settings/`: 활성 프리미엄 이용권이 있어야 접근할 수 있습니다.
 
 성공 화면이나 Paddle.js의 `checkout.completed` 이벤트는 UX에만 사용합니다. 권한은 서명이 검증된 `transaction.completed` Webhook만 지급합니다.
@@ -84,8 +85,12 @@ curl -i https://<백엔드-도메인>/
 - 첫 결제: `transaction.completed`의 `occurred_at`부터 21일을 부여합니다.
 - 재구매: 아직 남은 기간이 있으면 현재 만료 시각 뒤에 21일을 이어 붙입니다.
 - 실패/취소: 구매 상태만 `FAILED`/`CANCELED`로 바꾸고 권한은 지급하지 않습니다.
-- 승인된 부분 환불: `PARTIALLY_REFUNDED`로 기록하되 권한은 유지합니다.
+- 환불 요청 금액: `결제 금액 × 남은 이용 초 ÷ 전체 이용 초`를 원 단위로 내림합니다. 아직 시작하지 않은 적립 이용권은 전액 환불 대상으로 계산합니다.
+- 환불 요청만 생성된 상태에서는 이용권을 유지합니다. 운영진은 관리자 화면의 `requested_amount`와 거래 ID를 확인해 Paddle 대시보드에서 같은 금액으로 부분 환불하고, 처리 시작 전에 요청을 `PROCESSING`으로 바꿉니다.
+- 요청과 같은 금액의 부분 환불이 승인되면 `PARTIALLY_REFUNDED`로 기록하고 해당 구매의 미사용 기간을 회수하며, 환불 요청을 `COMPLETED`로 변경합니다.
+- 환불 요청과 연결되지 않았거나 요청 금액과 다른 부분 환불은 `PARTIALLY_REFUNDED`로만 기록하고 이용권은 자동 회수하지 않습니다.
 - 승인된 전액 환불/차지백: 환불된 구매에서 아직 사용하지 않은 시간만 총 만료 시각에서 차감합니다. 이미 사용한 기간과 다른 정상 구매의 21일은 유지합니다.
+- Paddle가 환불을 거절하면 환불 요청을 `REJECTED`로 변경하고 이용권은 유지합니다.
 - 동일 `event_id`는 `PaddleWebhookEvent`의 PK로 한 번만 처리하고, 같은 거래의 권한 지급 여부도 별도로 확인합니다.
 
 ## 로컬/샌드박스 테스트
@@ -100,5 +105,5 @@ python manage.py test premium situations.tests.DailyNotificationPreferenceSchedu
 - 성공: Checkout 후 `transaction.completed` delivery가 200인지, status API가 활성인지 확인합니다.
 - 실패: declined 카드 후 구매 상태와 Webhook delivery를 확인합니다.
 - 취소: Paddle Webhook simulator에서 `transaction.canceled`를 보내 권한이 생기지 않는지 확인합니다.
-- 환불: Sandbox 거래를 전액 refund하고 `adjustment.created`/`adjustment.updated` 후 권한이 회수되는지 확인합니다.
+- 환불: 환불 요청 생성 후 관리자 화면에 표시된 금액만큼 Sandbox 거래를 부분 refund하고, `adjustment.created`/`adjustment.updated` 후 요청 완료와 미사용 기간 회수를 확인합니다.
 - 중복: Paddle dashboard에서 같은 notification을 replay해 만료일이 늘어나지 않는지 확인합니다.

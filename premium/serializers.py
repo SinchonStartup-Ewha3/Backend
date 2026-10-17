@@ -1,5 +1,3 @@
-import re
-
 from django.utils import timezone
 from rest_framework import serializers
 
@@ -139,19 +137,31 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
 class PremiumRefundRequestSerializer(serializers.ModelSerializer):
     refundRequestId = serializers.IntegerField(source="pk", read_only=True)
     purchaseId = serializers.IntegerField(source="purchase_id", read_only=True)
-    bankName = serializers.CharField(source="bank_name", max_length=30)
-    accountNumber = serializers.CharField(
-        source="account_number",
-        max_length=30,
-        write_only=True,
+    reason = serializers.CharField(
+        max_length=500,
+        allow_blank=False,
+        trim_whitespace=True,
+        error_messages={
+            "required": "환불 사유를 입력해주세요.",
+            "blank": "환불 사유를 입력해주세요.",
+        },
     )
-    phoneNumber = serializers.CharField(
-        source="phone_number",
-        max_length=20,
-        write_only=True,
+    requestedAmount = serializers.IntegerField(
+        source="requested_amount",
+        read_only=True,
     )
-    accountNumberMasked = serializers.SerializerMethodField()
-    phoneNumberMasked = serializers.SerializerMethodField()
+    currencyCode = serializers.CharField(
+        source="currency_code",
+        read_only=True,
+    )
+    remainingSeconds = serializers.IntegerField(
+        source="remaining_seconds",
+        read_only=True,
+    )
+    paddleAdjustmentId = serializers.CharField(
+        source="paddle_adjustment_id",
+        read_only=True,
+    )
     requestedAt = serializers.DateTimeField(source="created_at", read_only=True)
     completedAt = serializers.DateTimeField(source="completed_at", read_only=True)
     rejectionReason = serializers.CharField(
@@ -164,46 +174,14 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
         fields = [
             "refundRequestId",
             "purchaseId",
-            "bankName",
-            "accountNumber",
-            "phoneNumber",
-            "accountNumberMasked",
-            "phoneNumberMasked",
+            "reason",
+            "requestedAmount",
+            "currencyCode",
+            "remainingSeconds",
+            "paddleAdjustmentId",
             "status",
             "rejectionReason",
             "requestedAt",
             "completedAt",
         ]
         read_only_fields = ["status"]
-
-    def validate_accountNumber(self, value):
-        normalized = re.sub(r"[\s-]", "", value)
-        if not normalized.isdigit() or not 8 <= len(normalized) <= 20:
-            raise serializers.ValidationError(
-                "계좌번호는 숫자 8~20자리로 입력해주세요."
-            )
-        return normalized
-
-    def validate_phoneNumber(self, value):
-        normalized = re.sub(r"[\s-]", "", value)
-        if not re.fullmatch(r"01[016789]\d{7,8}", normalized):
-            raise serializers.ValidationError(
-                "휴대전화 번호를 올바르게 입력해주세요."
-            )
-        return normalized
-
-    def validate_bankName(self, value):
-        value = value.strip()
-        if not value:
-            raise serializers.ValidationError("계좌 은행을 입력해주세요.")
-        return value
-
-    def get_accountNumberMasked(self, obj):
-        visible = obj.account_number[-4:]
-        return f"{'*' * max(0, len(obj.account_number) - 4)}{visible}"
-
-    def get_phoneNumberMasked(self, obj):
-        value = obj.phone_number
-        if len(value) < 7:
-            return "*" * len(value)
-        return f"{value[:3]}{'*' * (len(value) - 7)}{value[-4:]}"

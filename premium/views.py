@@ -31,6 +31,7 @@ from .services.paddle import (
     validate_paddle_settings,
     verify_webhook_signature,
 )
+from .services.refunds import RefundCalculationError, calculate_prorated_refund
 from .services.webhooks import PaddleWebhookValidationError, process_webhook
 
 
@@ -270,11 +271,18 @@ class PremiumRefundRequestView(APIView):
                     revoked_at__isnull=True,
                     entitlement_expires_at__gt=timezone.now(),
                 )
+                prorated_refund = calculate_prorated_refund(
+                    purchase,
+                    requested_at=now,
+                )
                 refund_request = serializer.save(
                     user=request.user,
                     purchase=purchase,
+                    requested_amount=prorated_refund.amount,
+                    currency_code=purchase.currency_code,
+                    remaining_seconds=prorated_refund.remaining_seconds,
                 )
-        except PremiumPurchase.DoesNotExist:
+        except (PremiumPurchase.DoesNotExist, RefundCalculationError):
             return self.no_refundable_purchase_response()
         except IntegrityError:
             existing_request = PremiumRefundRequest.objects.get(

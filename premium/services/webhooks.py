@@ -9,6 +9,7 @@ from premium.models import (
     PaddleWebhookEvent,
     PremiumEntitlement,
     PremiumPurchase,
+    PremiumRefundRequest,
 )
 
 from .entitlements import revoke_unused_entitlement
@@ -149,27 +150,90 @@ def _mark_transaction_state(data, event_type):
 
 def _process_adjustment(data, occurred_at):
     action = data.get("action")
-    status = data.get("status")
-    if action not in {"refund", "chargeback"} or status != "approved":
+    adjustment_status = data.get("status")
+    if action not in {"refund", "chargeback"}:
         return
 
     purchase = _find_purchase(data.get("transaction_id"))
     if purchase is None:
         return
 
-    purchase.paddle_adjustment_id = data.get("id") or ""
-    if data.get("type") != "full":
+    adjustment_id = data.get("id") or ""
+    purchase.paddle_adjustment_id = adjustment_id
+    purchase.save(update_fields=["paddle_adjustment_id", "modified_at"])
+
+    refund_request = None
+    if action == "refund":
+        refund_request = (
+            PremiumRefundRequest.objects.select_for_update()
+            .filter(purchase=purchase)
+            .first()
+        )
+        if (
+            refund_request is not None
+            and refund_request.paddle_adjustment_id
+            and refund_request.paddle_adjustment_id != adjustment_id
+        ):
+            refund_request = None
+
+    if refund_request is not None and adjustment_status == "pending_approval":
+        refund_request.status = PremiumRefundRequest.Status.PROCESSING
+        refund_request.paddle_adjustment_id = adjustment_id
+        refund_request.rejection_reason = ""
+        refund_request.save(
+            update_fields=[
+                "status",
+                "paddle_adjustment_id",
+                "rejection_reason",
+                "modified_at",
+            ]
+        )
+        return
+
+    if refund_request is not None and adjustment_status == "rejected":
+        refund_request.status = PremiumRefundRequest.Status.REJECTED
+        refund_request.paddle_adjustment_id = adjustment_id
+        refund_request.rejection_reason = "Paddle에서 환불 요청을 승인하지 않았습니다."
+        refund_request.save(
+            update_fields=[
+                "status",
+                "paddle_adjustment_id",
+                "rejection_reason",
+                "modified_at",
+            ]
+        )
+        return
+
+    if adjustment_status != "approved":
+        return
+
+    is_full_adjustment = data.get("type") == "full"
+    if not is_full_adjustment:
         purchase.status = PremiumPurchase.Status.PARTIALLY_REFUNDED
         purchase.save(
             update_fields=["status", "paddle_adjustment_id", "modified_at"]
         )
-        return
+
+        totals = data.get("totals") or {}
+        try:
+            refunded_amount = int(totals.get("total"))
+        except (TypeError, ValueError):
+            refunded_amount = None
+        if (
+            refund_request is None
+            or refunded_amount != refund_request.requested_amount
+        ):
+            return
 
     revoke_unused_entitlement(purchase, occurred_at)
     purchase.status = (
         PremiumPurchase.Status.CHARGEBACK
         if action == "chargeback"
-        else PremiumPurchase.Status.REFUNDED
+        else (
+            PremiumPurchase.Status.REFUNDED
+            if is_full_adjustment
+            else PremiumPurchase.Status.PARTIALLY_REFUNDED
+        )
     )
     purchase.save(
         update_fields=[
@@ -179,6 +243,21 @@ def _process_adjustment(data, occurred_at):
             "modified_at",
         ]
     )
+
+    if refund_request is not None:
+        refund_request.status = PremiumRefundRequest.Status.COMPLETED
+        refund_request.paddle_adjustment_id = adjustment_id
+        refund_request.completed_at = occurred_at
+        refund_request.rejection_reason = ""
+        refund_request.save(
+            update_fields=[
+                "status",
+                "paddle_adjustment_id",
+                "completed_at",
+                "rejection_reason",
+                "modified_at",
+            ]
+        )
 
 
 @transaction.atomic
