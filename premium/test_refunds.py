@@ -11,7 +11,7 @@ from .models import (
     PremiumPurchase,
     PremiumRefundRequest,
 )
-from .services.refunds import complete_manual_refund
+from .services.refunds import calculate_prorated_refund
 
 
 User = get_user_model()
@@ -39,11 +39,7 @@ class PremiumRefundRequestAPITests(APITestCase):
             completed_at=self.entitlement.started_at,
         )
         self.url = reverse("premium:refund-request")
-        self.payload = {
-            "bankName": "토스뱅크",
-            "accountNumber": "213-7838-4923-8573",
-            "phoneNumber": "010-1234-5678",
-        }
+        self.payload = {"reason": "남은 기간에 대한 환불을 요청합니다."}
 
     def test_login_is_required(self):
         self.client.force_authenticate(user=None)
@@ -52,22 +48,25 @@ class PremiumRefundRequestAPITests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    def test_creates_request_with_normalized_private_data(self):
+    def test_creates_prorated_refund_request(self):
         response = self.client.post(self.url, self.payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.assertEqual(response.data["purchaseId"], self.purchase.pk)
         self.assertEqual(response.data["status"], "REQUESTED")
-        self.assertTrue(response.data["accountNumberMasked"].endswith("8573"))
-        self.assertEqual(response.data["phoneNumberMasked"], "010****5678")
+        self.assertEqual(response.data["reason"], self.payload["reason"])
+        self.assertEqual(response.data["currencyCode"], "KRW")
+        self.assertEqual(response.data["requestedAmount"], 2380)
+        self.assertGreater(response.data["remainingSeconds"], 0)
+        self.assertNotIn("bankName", response.data)
         self.assertNotIn("accountNumber", response.data)
         self.assertNotIn("phoneNumber", response.data)
 
         refund_request = PremiumRefundRequest.objects.get(user=self.user)
-        self.assertEqual(refund_request.account_number, "213783849238573")
-        self.assertEqual(refund_request.phone_number, "01012345678")
+        self.assertEqual(refund_request.requested_amount, 2380)
+        self.assertEqual(refund_request.currency_code, "KRW")
 
-    def test_request_does_not_revoke_before_manual_completion(self):
+    def test_request_does_not_revoke_before_paddle_approval(self):
         response = self.client.post(self.url, self.payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
@@ -85,20 +84,11 @@ class PremiumRefundRequestAPITests(APITestCase):
         self.assertEqual(second.data["code"], "REFUND_REQUEST_ALREADY_EXISTS")
         self.assertEqual(PremiumRefundRequest.objects.count(), 1)
 
-    def test_invalid_account_and_phone_are_rejected(self):
-        response = self.client.post(
-            self.url,
-            {
-                "bankName": "토스뱅크",
-                "accountNumber": "invalid-account",
-                "phoneNumber": "1234",
-            },
-            format="json",
-        )
+    def test_blank_reason_is_rejected(self):
+        response = self.client.post(self.url, {"reason": " "}, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
-        self.assertIn("accountNumber", response.data)
-        self.assertIn("phoneNumber", response.data)
+        self.assertIn("reason", response.data)
 
     def test_no_refundable_purchase_returns_conflict(self):
         self.purchase.status = PremiumPurchase.Status.REFUNDED
@@ -109,27 +99,24 @@ class PremiumRefundRequestAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_409_CONFLICT)
         self.assertEqual(response.data["code"], "NO_REFUNDABLE_PURCHASE")
 
-    def test_get_returns_latest_request_with_masked_private_data(self):
+    def test_get_returns_latest_request(self):
         self.client.post(self.url, self.payload, format="json")
 
         response = self.client.get(self.url)
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertEqual(response.data["bankName"], "토스뱅크")
-        self.assertNotIn("accountNumber", response.data)
-        self.assertNotIn("phoneNumber", response.data)
+        self.assertEqual(response.data["reason"], self.payload["reason"])
+        self.assertEqual(response.data["requestedAmount"], 2380)
+        self.assertIsNone(response.data["completedAt"])
 
-    def test_manual_completion_revokes_unused_period(self):
-        self.client.post(self.url, self.payload, format="json")
-        refund_request = PremiumRefundRequest.objects.get(user=self.user)
+    def test_future_stacked_period_is_fully_refundable(self):
+        self.purchase.entitlement_started_at = self.now + timedelta(days=5)
+        self.purchase.entitlement_expires_at = self.now + timedelta(days=26)
 
-        completed = complete_manual_refund(
-            refund_request,
-            completed_at=self.now,
+        refund = calculate_prorated_refund(
+            self.purchase,
+            requested_at=self.now,
         )
 
-        self.purchase.refresh_from_db()
-        self.entitlement.refresh_from_db()
-        self.assertEqual(completed.status, PremiumRefundRequest.Status.COMPLETED)
-        self.assertEqual(self.purchase.status, PremiumPurchase.Status.REFUNDED)
-        self.assertFalse(self.entitlement.is_active(self.now))
+        self.assertEqual(refund.amount, 2500)
+        self.assertEqual(refund.remaining_seconds, 21 * 24 * 60 * 60)

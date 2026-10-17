@@ -7,7 +7,6 @@ from .models import (
     PremiumPurchase,
     PremiumRefundRequest,
 )
-from .services.refunds import RefundRequestStateError, complete_manual_refund
 
 
 @admin.register(PremiumEntitlement)
@@ -38,19 +37,23 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
         "id",
         "user",
         "purchase",
-        "bank_name",
+        "requested_amount",
+        "currency_code",
         "status",
+        "paddle_adjustment_id",
         "created_at",
         "completed_at",
     )
-    list_filter = ("status", "bank_name")
+    list_filter = ("status",)
     search_fields = ("user__nickname",)
     readonly_fields = (
         "user",
         "purchase",
-        "bank_name",
-        "account_number",
-        "phone_number",
+        "reason",
+        "requested_amount",
+        "currency_code",
+        "remaining_seconds",
+        "paddle_adjustment_id",
         "status",
         "completed_at",
         "created_at",
@@ -58,11 +61,10 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
     )
     actions = (
         "mark_as_processing",
-        "mark_as_completed",
         "mark_as_rejected",
     )
 
-    @admin.action(description="선택한 요청을 처리 중으로 변경")
+    @admin.action(description="Paddle 환불 처리 중으로 변경")
     def mark_as_processing(self, request, queryset):
         updated = queryset.filter(
             status=PremiumRefundRequest.Status.REQUESTED,
@@ -71,30 +73,6 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
             modified_at=timezone.now(),
         )
         self.message_user(request, f"{updated}건을 처리 중으로 변경했습니다.")
-
-    @admin.action(description="선택한 요청을 환불 완료로 처리")
-    def mark_as_completed(self, request, queryset):
-        completed = 0
-        skipped = 0
-        for refund_request in queryset:
-            was_completed = (
-                refund_request.status
-                == PremiumRefundRequest.Status.COMPLETED
-            )
-            try:
-                result = complete_manual_refund(refund_request)
-            except RefundRequestStateError:
-                skipped += 1
-                continue
-            if (
-                not was_completed
-                and result.status == PremiumRefundRequest.Status.COMPLETED
-            ):
-                completed += 1
-        self.message_user(
-            request,
-            f"{completed}건을 환불 완료 처리했습니다. 건너뜀: {skipped}건",
-        )
 
     @admin.action(description="선택한 요청을 환불 거절로 처리")
     def mark_as_rejected(self, request, queryset):

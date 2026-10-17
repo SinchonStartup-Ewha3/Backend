@@ -84,9 +84,10 @@ class PremiumBillingAPITests(APITestCase):
         PremiumRefundRequest.objects.create(
             user=self.user,
             purchase=purchase,
-            bank_name="토스뱅크",
-            account_number="123456789012",
-            phone_number="01012345678",
+            reason="남은 기간 환불",
+            requested_amount=2380,
+            currency_code="KRW",
+            remaining_seconds=20 * 24 * 60 * 60,
         )
 
         response = self.client.get(self.url)

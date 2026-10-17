@@ -85,7 +85,7 @@ class PremiumPurchase(models.Model):
 
 
 class PremiumRefundRequest(models.Model):
-    """운영진이 계좌 송금으로 처리하는 프리미엄 수동 환불 요청."""
+    """운영진이 Paddle 대시보드에서 처리하는 프리미엄 환불 요청."""
 
     class Status(models.TextChoices):
         REQUESTED = "REQUESTED", "환불 요청"
@@ -105,9 +105,11 @@ class PremiumRefundRequest(models.Model):
         on_delete=models.PROTECT,
         related_name="refund_request",
     )
-    bank_name = models.CharField(max_length=30)
-    account_number = models.CharField(max_length=30)
-    phone_number = models.CharField(max_length=20)
+    reason = models.CharField(max_length=500)
+    requested_amount = models.PositiveIntegerField()
+    currency_code = models.CharField(max_length=3)
+    remaining_seconds = models.PositiveBigIntegerField()
+    paddle_adjustment_id = models.CharField(max_length=50, blank=True)
     status = models.CharField(
         max_length=20,
         choices=Status.choices,
