@@ -6,6 +6,7 @@ from .models import (
     FortunePurchase,
     FortuneResult,
     FortuneCoupon,
+    FortuneCouponAttempt,
 )
 
 
@@ -70,3 +71,10 @@ class FortuneCouponAdmin(admin.ModelAdmin):
     list_filter = ("product", "batch_label", "is_active")
     search_fields = ("code", "redeemed_by__nickname")
     readonly_fields = ("redeemed_by", "redeemed_at", "purchase", "created_at")
+
+@admin.register(FortuneCouponAttempt)
+class FortuneCouponAttemptAdmin(admin.ModelAdmin):
+    """잘못 잠긴 사용자는 locked_until을 비워서 바로 풀어줄 수 있다."""
+
+    list_display = ("user", "failed_count", "locked_until", "modified_at")
+    search_fields = ("user__nickname",)
