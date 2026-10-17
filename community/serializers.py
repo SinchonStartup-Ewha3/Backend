@@ -1,5 +1,8 @@
 from django.utils import timezone
 from rest_framework import serializers
+from django.db import transaction
+
+from .services.files import delete_storage_file_on_commit
 
 from core.geo import find_nearest_region
 from core.serializers import RegionSerializer
@@ -52,12 +55,20 @@ class PostSerializer(serializers.ModelSerializer):
     tagLabel = serializers.CharField(source="get_tag_display", read_only=True)
 
 
+
+    imageUrl = serializers.SerializerMethodField()
+
     image = serializers.ImageField(
         required=False,
-        allow_null=True,
+        allow_null=False,
         write_only=True,
     )
-    imageUrl = serializers.SerializerMethodField()
+
+    removeImage = serializers.BooleanField(
+        write_only=True,
+        required=False,
+        default=False,
+    )
 
 
     createdAt = serializers.DateTimeField(source="created_at", read_only=True)
@@ -77,6 +88,7 @@ class PostSerializer(serializers.ModelSerializer):
             "tagLabel",
             "image",
             "imageUrl",
+            "removeImage",
             "region",
             "locationMode",
             "lat",
@@ -175,12 +187,21 @@ class PostSerializer(serializers.ModelSerializer):
         return image
 
     def validate(self, attrs):
-        """
-        현재 위치를 선택한 신규 게시글에는
-        위도와 경도가 모두 필요합니다.
-        """
+        remove_image = attrs.get("removeImage", False)
 
-        attrs = super().validate(attrs)
+        if remove_image and "image" in attrs:
+            raise serializers.ValidationError({
+                "removeImage": (
+                    "이미지 삭제와 새 이미지 등록은 동시에 요청할 수 없습니다."
+                )
+            })
+
+        if self.instance is None and remove_image:
+            raise serializers.ValidationError({
+                "removeImage": (
+                    "게시글 작성 시에는 이미지 삭제를 요청할 수 없습니다."
+                )
+            })
 
         if self.instance is not None:
             return attrs
@@ -190,7 +211,9 @@ class PostSerializer(serializers.ModelSerializer):
         if location_mode == "CURRENT":
             if attrs.get("lat") is None or attrs.get("lng") is None:
                 raise serializers.ValidationError({
-                    "location": "현재 위치를 사용하려면 위도와 경도가 필요합니다."
+                    "location": (
+                        "현재 위치를 사용하려면 위도와 경도가 필요합니다."
+                    )
                 })
 
         return attrs
@@ -202,7 +225,10 @@ class PostSerializer(serializers.ModelSerializer):
         request = self.context["request"]
         user = request.user
 
+        validated_data.pop("removeImage", False)
+
         location_mode = validated_data.pop("locationMode", "SAVED")
+        
         lat = validated_data.pop("lat", None)
         lng = validated_data.pop("lng", None)
 
@@ -230,13 +256,49 @@ class PostSerializer(serializers.ModelSerializer):
 
 
     def update(self, instance, validated_data):
-        """
-        게시글 수정으로 작성 당시 지역을 바꿀 수 없도록
-        위치 관련 입력값을 제거합니다.
-        """
-
         validated_data.pop("locationMode", None)
         validated_data.pop("lat", None)
         validated_data.pop("lng", None)
 
-        return super().update(instance, validated_data)
+        remove_image = validated_data.pop("removeImage", False)
+
+        old_image_name = (
+            instance.image.name
+            if instance.image
+            else None
+        )
+        old_image_storage = (
+            instance.image.storage
+            if instance.image
+            else None
+        )
+
+        if remove_image:
+            validated_data["image"] = None
+
+        with transaction.atomic():
+            instance = super().update(
+                instance,
+                validated_data,
+            )
+
+            new_image_name = (
+                instance.image.name
+                if instance.image
+                else None
+            )
+
+            # 이미지가 제거되거나 다른 파일로 교체된 경우에만
+            # 기존 파일을 삭제한다.
+            if (
+                old_image_storage
+                and old_image_name
+                and old_image_name != new_image_name
+            ):
+                delete_storage_file_on_commit(
+                    storage=old_image_storage,
+                    name=old_image_name,
+                )
+
+        return instance
+    

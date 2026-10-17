@@ -7,6 +7,11 @@ from .models import NotificationSchedule
 class NotificationScheduleSerializer(serializers.ModelSerializer):
     scheduleId = serializers.IntegerField(source="pk", read_only=True)
 
+    purpose = serializers.ChoiceField(
+        choices=NotificationSchedule.Purpose.choices,
+        required=True,
+    )
+
     outingTime = serializers.TimeField(
         source="outing_time",
         format="%H:%M",
