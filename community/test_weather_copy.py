@@ -128,6 +128,22 @@ class CommunityWeatherCopyTests(TestCase):
 
         self.assertEqual(region, self.region)
         self.assertEqual(result["headline"]["source"], "FALLBACK")
+        self.assertEqual(
+            result["headline"]["title"],
+            "가볍게 외출하기 좋은 오늘",
+        )
+        self.assertEqual(
+            result["premiumCard"]["message"],
+            "오늘은 빨래하기 좋은 날씨예요",
+        )
+        self.assertNotIn(
+            self.user.nickname,
+            result["headline"]["title"],
+        )
+        self.assertNotIn(
+            self.user.nickname,
+            result["premiumCard"]["message"],
+        )
         mock_current_weather.assert_called_once_with(60, 127)
         mock_hourly_weather.assert_called_once_with(60, 127, hours=24)
         mock_generate_copy.assert_called_once()
