@@ -1,5 +1,5 @@
 from rest_framework import generics
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 
 from .models import NotificationSchedule, WaterIntake
 from .serializers import NotificationScheduleSerializer, WaterIntakeCreateSerializer
@@ -12,6 +12,7 @@ from core.constants import SituationType
 from core.serializers import RegionSerializer
 from home.services import kma_client as kma
 from home.services.kma_client import KmaApiError
+from home.services.location import LocationError, resolve_location
 from home.services.weather import get_hourly_weather, get_user_grid, get_current_weather
 from .services.laundry import build_laundry_info
 
@@ -61,17 +62,20 @@ class NotificationScheduleDetailView(
 
 
 class LaundryView(APIView):
+    """로그인 없이 볼 수 있다. 비로그인은 ?regionCode= 또는 ?lat=&lng=로 위치를 보낸다."""
+
+    permission_classes = [AllowAny]    
     def get(self, request):
-        grid = get_user_grid(request.user)
-        if grid is None:
-            return Response({"detail": "위치를 먼저 설정해주세요."},
-                            status=status.HTTP_400_BAD_REQUEST)
         try:
-            hourly = get_hourly_weather(*grid)
+            location = resolve_location(request)
+        except LocationError as e:
+            return Response(e.to_response_data(), status=e.status)
+        try:
+            hourly = get_hourly_weather(*location.grid)
         except KmaApiError as e:
             return Response({"detail": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
 
-        region = RegionSerializer(request.user.region).data if request.user.region else None
+        region = RegionSerializer(location.region).data if location.region else None
         return Response({
             "situation": SituationType.LAUNDRY,
             "region": region,
@@ -79,17 +83,21 @@ class LaundryView(APIView):
         })
 
 class RunningView(APIView):
+    """로그인 없이 볼 수 있다. 비로그인은 ?regionCode= 또는 ?lat=&lng=로 위치를 보낸다."""
+
+    permission_classes = [AllowAny]
+
     def get(self, request):
-        grid = get_user_grid(request.user)
-        if grid is None:
-            return Response({"detail": "위치를 먼저 설정해주세요."},
-                            status=status.HTTP_400_BAD_REQUEST)
         try:
-            hourly = get_hourly_weather(*grid)
+            location = resolve_location(request)
+        except LocationError as e:
+            return Response(e.to_response_data(), status=e.status)
+        try:
+            hourly = get_hourly_weather(*location.grid)
         except KmaApiError as e:
             return Response({"detail": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
 
-        region = request.user.region
+        region = location.region
         return Response({
             "situation": SituationType.RUNNING,
             "region": RegionSerializer(region).data if region else None,

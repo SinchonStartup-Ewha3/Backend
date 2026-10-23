@@ -1,6 +1,7 @@
 from django.shortcuts import render
 
 from rest_framework import generics
+from rest_framework.permissions import AllowAny
 from rest_framework.exceptions import ValidationError
 
 from .models import Region
@@ -9,7 +10,7 @@ from .serializers import RegionSerializer
 
 class RegionSearchView(generics.ListAPIView):
     """직접 위치 설정 화면의 지역 검색"""
-
+    permission_classes = [AllowAny]
     serializer_class = RegionSerializer
     pagination_class = None
 
