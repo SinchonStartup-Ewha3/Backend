@@ -29,17 +29,6 @@ class CommunityLocationRequired(Exception):
     """사용자의 지역을 결정할 수 없을 때 발생합니다."""
 
 
-def _nickname_with_suffix(nickname: str) -> str:
-    """닉네임 뒤에 '님'을 한 번만 붙입니다."""
-
-    nickname = nickname.strip()
-
-    if nickname.endswith("님"):
-        return nickname
-
-    return f"{nickname}님"
-
-
 def _resolve_region(user):
     """계정 지역을 우선 사용하고, 없으면 마지막 GPS 좌표로 찾습니다."""
 
@@ -209,17 +198,12 @@ def _fallback_copy(
     }
 
 
-def _personalize(user, generated: dict) -> dict:
-    """캐시된 공통 문구 앞에 현재 사용자 닉네임을 붙입니다."""
-
-    display_name = _nickname_with_suffix(user.nickname)
+def _build_response_copy(generated: dict) -> dict:
+    """생성된 공통 문구를 커뮤니티 응답 형식으로 변환합니다."""
 
     return {
         "headline": {
-            "title": (
-                f"{display_name}, "
-                f"{generated['headlineTitle']}"
-            ),
+            "title": generated["headlineTitle"],
             "description": generated[
                 "headlineDescription"
             ],
@@ -227,10 +211,7 @@ def _personalize(user, generated: dict) -> dict:
         },
         "premiumCard": {
             "actionType": generated["actionType"],
-            "message": (
-                f"{display_name}, "
-                f"{generated['premiumMessage']}"
-            ),
+            "message": generated["premiumMessage"],
             "subMessage": FIXED_SUB_MESSAGE,
             "targetUrl": PREMIUM_TARGET_URL,
         },
@@ -253,7 +234,7 @@ def build_community_weather_copy(user) -> tuple[object, dict]:
     cached = cache.get(cache_key)
 
     if cached is not None:
-        return region, _personalize(user, cached)
+        return region, _build_response_copy(cached)
 
     current_weather = get_current_weather(
         grid[0],
@@ -324,4 +305,4 @@ def build_community_weather_copy(user) -> tuple[object, dict]:
         ),
     )
 
-    return region, _personalize(user, result)
+    return region, _build_response_copy(result)
