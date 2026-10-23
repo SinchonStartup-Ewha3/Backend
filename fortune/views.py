@@ -177,7 +177,9 @@ class FortunePaymentConfirmView(APIView):
         with transaction.atomic():
             locked_purchase = (
                 FortunePurchase.objects
-                .select_for_update()
+                # user가 null 허용(탈퇴 시 SET_NULL)이라 LEFT JOIN이 되므로,
+                # PostgreSQL에서는 구매 행만 잠가야 한다.
+                .select_for_update(of=("self",))
                 .select_related("user")
                 .get(id=purchase.id)
             )
@@ -296,8 +298,7 @@ class FortuneCouponRedeemView(APIView):
         )
 
 class MyFortunePassView(APIView):
-    """마이페이지 결제 관리: 내 운세 이용권 현황 (앱 결제 + 쿠폰 코드)"""
-
+    """마이페이지 결제 관리: 내 운세 이용권 현황 (굿즈 쿠폰 코드로 받은 이용권만)"""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
