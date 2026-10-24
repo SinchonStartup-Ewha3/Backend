@@ -125,6 +125,10 @@ COMMUNITY_COPY_CONSISTENCY_RATIO = env.float(
 DEBUG = env('DEBUG')
 
 ALLOWED_HOSTS = env.list('ALLOWED_HOSTS')
+CORS_ALLOWED_ORIGINS = env.list(
+    "CORS_ALLOWED_ORIGINS",
+    default=["https://weether.kr"],
+)
 
 # Database
 # https://docs.djangoproject.com/en/6.1/ref/settings/#databases
@@ -141,6 +145,7 @@ INSTALLED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
+    "corsheaders",
     "storages",
     "rest_framework",
     "rest_framework_simplejwt",
@@ -180,6 +185,7 @@ SIMPLE_JWT = {
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "corsheaders.middleware.CorsMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     'whitenoise.middleware.WhiteNoiseMiddleware',
     "django.middleware.common.CommonMiddleware",
