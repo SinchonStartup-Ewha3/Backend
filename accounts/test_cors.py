@@ -16,6 +16,7 @@ class SocialLoginCorsTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
         self.assertEqual(response["Access-Control-Allow-Origin"], self.origin)
+        self.assertEqual(response["Access-Control-Allow-Credentials"], "true")
 
     def test_preflight_allows_frontend_origin(self):
         response = self.client.options(
@@ -27,12 +28,25 @@ class SocialLoginCorsTests(APITestCase):
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response["Access-Control-Allow-Origin"], self.origin)
+        self.assertEqual(response["Access-Control-Allow-Credentials"], "true")
         self.assertIn("POST", response["Access-Control-Allow-Methods"])
         self.assertIn("OPTIONS", response["Access-Control-Allow-Methods"])
         self.assertIn(
             "content-type",
             response["Access-Control-Allow-Headers"].lower(),
         )
+
+    def test_preflight_allows_www_frontend_origin(self):
+        origin = "https://www.weether.kr"
+        response = self.client.options(
+            reverse("social-login"),
+            HTTP_ORIGIN=origin,
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD="POST",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response["Access-Control-Allow-Origin"], origin)
+        self.assertEqual(response["Access-Control-Allow-Credentials"], "true")
 
     def test_preflight_rejects_unlisted_origin(self):
         response = self.client.options(
