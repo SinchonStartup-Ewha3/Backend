@@ -370,6 +370,28 @@ class PostAPITests(APITestCase):
         self.assertNotIn("author", response.data["results"][0])
         self.assertNotIn("authorProfileImage", response.data["results"][0])
 
+    def test_guest_can_retrieve_feed(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="비로그인 공개 게시물",
+            tag=Post.Tag.CARDIGAN,
+        )
+        PostLike.objects.create(
+            user=self.other_user,
+            post=post,
+        )
+
+        response = self.client.get(
+            self.create_url,
+            {"tag": "cardigan"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["likeCount"], 1)
+        self.assertFalse(response.data["results"][0]["isLiked"])
+
     def test_feed_rejects_invalid_tag(self):
         # [기능] 정의되지 않은 태그로는 피드를 조회할 수 없다.
         self.client.force_authenticate(user=self.author)
@@ -404,11 +426,11 @@ class PostAPITests(APITestCase):
             "상세 조회할 게시물",
         )
 
-    def test_other_user_cannot_retrieve_post_detail(self):
+    def test_other_user_can_retrieve_post_detail(self):
         post = Post.objects.create(
             user=self.author,
             region=self.region,
-            content="작성자만 볼 상세 게시물",
+            content="다른 사용자도 볼 공개 게시물",
             tag=Post.Tag.PADDED,
         )
         self.client.force_authenticate(user=self.other_user)
@@ -420,9 +442,68 @@ class PostAPITests(APITestCase):
             )
         )
 
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["postId"], post.pk)
+
+    def test_guest_can_retrieve_post_detail(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="비로그인 상세 게시물",
+            tag=Post.Tag.PADDED,
+        )
+
+        response = self.client.get(
+            reverse(
+                "community:post-update",
+                kwargs={"post_id": post.pk},
+            )
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["postId"], post.pk)
+        self.assertFalse(response.data["isLiked"])
+
+    def test_guest_cannot_update_post(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="수정하면 안 되는 게시물",
+            tag=Post.Tag.PADDED,
+        )
+
+        response = self.client.patch(
+            reverse(
+                "community:post-update",
+                kwargs={"post_id": post.pk},
+            ),
+            {"content": "비로그인 수정"},
+            format="json",
+        )
+
         self.assertEqual(
             response.status_code,
-            status.HTTP_404_NOT_FOUND,
+            status.HTTP_401_UNAUTHORIZED,
+        )
+
+    def test_guest_cannot_toggle_post_like(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="좋아요 인증 테스트",
+            tag=Post.Tag.PADDED,
+        )
+
+        response = self.client.post(
+            reverse(
+                "community:post-like-toggle",
+                kwargs={"post_id": post.pk},
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_401_UNAUTHORIZED,
         )
 
     def test_my_post_list_only_contains_my_posts(self):
