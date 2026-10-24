@@ -1,26 +1,31 @@
-# home/views.py 전체 교체
 from rest_framework import status
+from rest_framework.permissions import AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from core.serializers import RegionSerializer
 from .services.kma_client import KmaApiError
 from .services.life_info import build_life_info
-from .services.weather import get_current_weather, get_hourly_weather, get_user_grid
+from .services.location import LocationError, resolve_location
+from .services.weather import get_current_weather, get_hourly_weather
 
 
 class _WeatherBaseView(APIView):
+    """로그인 없이 볼 수 있다. 비로그인은 ?regionCode= 또는 ?lat=&lng=로 위치를 보낸다."""
+
+    permission_classes = [AllowAny]
+
     def get(self, request):
-        grid = get_user_grid(request.user)
-        if grid is None:
-            return Response({"detail": "위치를 먼저 설정해주세요."},
-                            status=status.HTTP_400_BAD_REQUEST)
         try:
-            data = self.build(*grid)
+            location = resolve_location(request)
+        except LocationError as e:
+            return Response(e.to_response_data(), status=e.status)
+        try:
+            data = self.build(*location.grid)
         except KmaApiError as e:
             return Response({"detail": str(e)}, status=status.HTTP_502_BAD_GATEWAY)
 
-        region = RegionSerializer(request.user.region).data if request.user.region else None
+        region = RegionSerializer(location.region).data if location.region else None
         return Response({"region": region, **data})
 
 
