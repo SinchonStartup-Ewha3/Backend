@@ -5,12 +5,10 @@ from django.conf import settings
 from django.core.cache import cache
 from django.utils import timezone
 
-from core.geo import find_nearest_region
 from home.services.life_info import build_life_info
 from home.services.weather import (
     get_current_weather,
     get_hourly_weather,
-    get_user_grid,
 )
 
 from community.models import Post
@@ -23,25 +21,6 @@ FIXED_SUB_MESSAGE = (
 )
 
 PREMIUM_TARGET_URL = "/premium"
-
-
-class CommunityLocationRequired(Exception):
-    """사용자의 지역을 결정할 수 없을 때 발생합니다."""
-
-
-def _resolve_region(user):
-    """계정 지역을 우선 사용하고, 없으면 마지막 GPS 좌표로 찾습니다."""
-
-    if user.region is not None:
-        return user.region
-
-    if user.last_lat is not None and user.last_lng is not None:
-        return find_nearest_region(
-            float(user.last_lat),
-            float(user.last_lng),
-        )
-
-    return None
 
 
 def _district_prefix(region) -> str:
@@ -218,14 +197,8 @@ def _build_response_copy(generated: dict) -> dict:
     }
 
 
-def build_community_weather_copy(user) -> tuple[object, dict]:
-    """사용자 지역의 커뮤니티 화면 문구를 생성합니다."""
-
-    region = _resolve_region(user)
-    grid = get_user_grid(user)
-
-    if region is None or grid is None:
-        raise CommunityLocationRequired
+def build_community_weather_copy(*, region, grid) -> tuple[object, dict]:
+    """지정한 지역의 커뮤니티 화면 문구를 생성합니다."""
 
     cache_key = (
         f"community-weather-copy:{region.region_code}"
