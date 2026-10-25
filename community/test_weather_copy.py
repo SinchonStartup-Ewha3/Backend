@@ -3,7 +3,10 @@ from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
-from django.test import SimpleTestCase, TestCase, override_settings
+from django.test import SimpleTestCase, override_settings
+from django.urls import reverse
+from rest_framework import status
+from rest_framework.test import APITestCase
 
 from core.models import Region
 
@@ -14,6 +17,20 @@ from .services.weather_copy import (
 
 
 User = get_user_model()
+
+COPY_DATA = {
+    "headline": {
+        "title": "오늘의 날씨",
+        "description": "가디건을 추천해요",
+        "source": "WEATHER",
+    },
+    "premiumCard": {
+        "actionType": "WEATHER",
+        "message": "날씨를 확인해보세요",
+        "subMessage": "알림 기능을 사용해보세요",
+        "targetUrl": "/premium",
+    },
+}
 
 
 def _life_info():
@@ -75,7 +92,7 @@ class FallbackCopyTests(SimpleTestCase):
 
 
 @override_settings(COMMUNITY_WEATHER_COPY_CACHE_SECONDS=300)
-class CommunityWeatherCopyTests(TestCase):
+class CommunityWeatherCopyTests(APITestCase):
     def setUp(self):
         cache.clear()
         self.region = Region.objects.create(
@@ -124,7 +141,10 @@ class CommunityWeatherCopyTests(TestCase):
                 return_value=None,
             ) as mock_generate_copy,
         ):
-            region, result = build_community_weather_copy(self.user)
+            region, result = build_community_weather_copy(
+                region=self.region,
+                grid=(60, 127),
+            )
 
         self.assertEqual(region, self.region)
         self.assertEqual(result["headline"]["source"], "FALLBACK")
@@ -147,3 +167,62 @@ class CommunityWeatherCopyTests(TestCase):
         mock_current_weather.assert_called_once_with(60, 127)
         mock_hourly_weather.assert_called_once_with(60, 127, hours=24)
         mock_generate_copy.assert_called_once()
+
+    @patch("community.views.build_community_weather_copy")
+    def test_guest_can_use_region_code(self, mock_build_copy):
+        mock_build_copy.return_value = (self.region, COPY_DATA)
+
+        response = self.client.get(
+            reverse("community:weather-copy"),
+            {"regionCode": self.region.region_code},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_build_copy.assert_called_once_with(
+            region=self.region,
+            grid=(60, 127),
+        )
+
+    @patch("community.views.build_community_weather_copy")
+    def test_guest_can_use_lat_lng(self, mock_build_copy):
+        mock_build_copy.return_value = (self.region, COPY_DATA)
+
+        response = self.client.get(
+            reverse("community:weather-copy"),
+            {"lat": "37.5638", "lng": "126.9795"},
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_build_copy.assert_called_once_with(
+            region=self.region,
+            grid=(60, 127),
+        )
+
+    def test_guest_without_location_is_rejected(self):
+        response = self.client.get(
+            reverse("community:weather-copy")
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertEqual(
+            response.data["code"],
+            "COMMUNITY_LOCATION_REQUIRED",
+        )
+
+    @patch("community.views.build_community_weather_copy")
+    def test_logged_in_user_can_use_saved_region(self, mock_build_copy):
+        mock_build_copy.return_value = (self.region, COPY_DATA)
+        self.client.force_authenticate(user=self.user)
+
+        response = self.client.get(
+            reverse("community:weather-copy")
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        mock_build_copy.assert_called_once_with(
+            region=self.region,
+            grid=(60, 127),
+        )
