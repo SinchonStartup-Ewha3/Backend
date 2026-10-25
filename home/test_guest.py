@@ -90,7 +90,33 @@ class GuestLocationTests(APITestCase):
         self.assertEqual(self.client.get(self.url).data["code"], "LOCATION_REQUIRED")
         res = self.client.get(self.url, {"regionCode": "1114055000"})
         self.assertEqual(res.status_code, status.HTTP_200_OK)
+    def _gps_user_without_region(self):
+        return User.objects.create_user(
+            nickname="GPS지역없음",
+            location_mode=User.LocationMode.GPS,
+            last_lat="37.563800",
+            last_lng="126.979500",
+        )
 
+    @patch("home.views.get_current_weather", return_value=CURRENT)
+    def test_gps_user_without_region_gets_nearest_region(self, mock_weather):
+        self.client.force_authenticate(self._gps_user_without_region())
+
+        res = self.client.get(self.url)
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        self.assertEqual(res.data["region"]["regionCode"], "1114055000")
+        mock_weather.assert_called_once_with(60, 127)
+
+    @patch("community.views.build_community_weather_copy")
+    def test_gps_user_without_region_community_copy(self, mock_build):
+        mock_build.return_value = (self.region, {})
+        self.client.force_authenticate(self._gps_user_without_region())
+
+        res = self.client.get(reverse("community:weather-copy"))
+
+        self.assertEqual(res.status_code, status.HTTP_200_OK)
+        mock_build.assert_called_once_with(region=self.region, grid=(60, 127))
     @patch("situations.views.build_laundry_info", return_value={})
     @patch("situations.views.get_hourly_weather", return_value=[])
     def test_guest_laundry(self, mock_hourly, _):
