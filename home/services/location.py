@@ -66,8 +66,12 @@ def resolve_location(request) -> ResolvedLocation:
     if user.is_authenticated:
         grid = get_user_grid(user)
         if grid is not None:
-            return ResolvedLocation(grid, user.region)
-
+            # GPS 사용자는 region이 비어 있을 수 있어 마지막 좌표로 가장 가까운 동을 찾는다.
+            region = user.region
+            if region is None and user.last_lat is not None and user.last_lng is not None:
+                region = find_nearest_region(float(user.last_lat), float(user.last_lng))
+            return ResolvedLocation(grid, region)
+        
     raise LocationError(
         "LOCATION_REQUIRED",
         "위치 정보가 필요해요. regionCode 또는 lat·lng를 함께 보내주세요.",
