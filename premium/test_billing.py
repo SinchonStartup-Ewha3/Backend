@@ -13,7 +13,7 @@ from .models import (
     PremiumPurchase,
     PremiumRefundRequest,
 )
-from .services.refunds import suspend_refund_access
+from .services.refunds import reject_refund_request, suspend_refund_access
 
 
 User = get_user_model()
@@ -196,10 +196,54 @@ class PremiumBillingAPITests(APITestCase):
         suspend_refund_access(refund_request, suspended_at=self.now)
 
         response = self.client.get(self.url)
+        status_response = self.client.get(reverse("premium:status"))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         subscription = response.data["subscription"]
         self.assertEqual(subscription["paymentMethod"], "BANK_TRANSFER")
         self.assertFalse(subscription["isActive"])
         self.assertEqual(subscription["remainingSeconds"], 0)
+        self.assertFalse(subscription["canRequestRefund"])
+        self.assertFalse(status_response.data["isPremium"])
+        self.assertIsNone(status_response.data["paymentMethod"])
+
+    def test_rejected_bank_transfer_refund_restores_active_status(self):
+        started_at = self.now - timedelta(days=1)
+        expires_at = self.now + timedelta(days=20)
+        PremiumEntitlement.objects.create(
+            user=self.user,
+            started_at=started_at,
+            expires_at=expires_at,
+        )
+        transfer = BankTransferRequest.objects.create(
+            user=self.user,
+            depositor_name="결제관리사용자",
+            status=BankTransferRequest.Status.APPROVED,
+            entitlement_started_at=started_at,
+            entitlement_expires_at=expires_at,
+            reviewed_at=started_at,
+        )
+        refund_request = PremiumRefundRequest.objects.create(
+            user=self.user,
+            bank_transfer_request=transfer,
+            reason="남은 기간 환불",
+            requested_amount=2380,
+            currency_code="KRW",
+            remaining_seconds=20 * 24 * 60 * 60,
+        )
+        suspend_refund_access(refund_request, suspended_at=self.now)
+        reject_refund_request(
+            refund_request,
+            reason="환불 조건에 맞지 않습니다.",
+            rejected_at=timezone.now(),
+        )
+
+        status_response = self.client.get(reverse("premium:status"))
+        billing_response = self.client.get(self.url)
+
+        self.assertTrue(status_response.data["isPremium"])
+        self.assertEqual(status_response.data["paymentMethod"], "BANK_TRANSFER")
+        subscription = billing_response.data["subscription"]
+        self.assertTrue(subscription["isActive"])
+        self.assertEqual(subscription["paymentMethod"], "BANK_TRANSFER")
         self.assertFalse(subscription["canRequestRefund"])

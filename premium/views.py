@@ -143,12 +143,22 @@ class PremiumStatusView(APIView):
         bank_transfer_status = (
             latest_bank_transfer.status if latest_bank_transfer else None
         )
-        active_bank_transfer = BankTransferRequest.objects.filter(
-            user=request.user,
-            status=BankTransferRequest.Status.APPROVED,
-            entitlement_started_at__lte=now,
-            entitlement_expires_at__gt=now,
-        ).exists()
+        active_bank_transfer = is_premium and (
+            BankTransferRequest.objects.filter(
+                user=request.user,
+                status=BankTransferRequest.Status.APPROVED,
+                entitlement_started_at__lte=now,
+                entitlement_expires_at__gt=now,
+            )
+            .exclude(
+                refund_request__status__in=[
+                    PremiumRefundRequest.Status.REQUESTED,
+                    PremiumRefundRequest.Status.PROCESSING,
+                    PremiumRefundRequest.Status.COMPLETED,
+                ]
+            )
+            .exists()
+        )
         active_payapp_payment = PayAppPayment.objects.filter(
             user=request.user,
             entitlement_started_at__lte=now,
@@ -311,6 +321,17 @@ class PremiumBillingView(APIView):
             entitlement_expires_at__gt=now,
             refund_request__isnull=True,
         ).exists()
+        bank_refund_blocks_access = bool(
+            latest_bank_transfer
+            and PremiumRefundRequest.objects.filter(
+                bank_transfer_request=latest_bank_transfer,
+                status__in=[
+                    PremiumRefundRequest.Status.REQUESTED,
+                    PremiumRefundRequest.Status.PROCESSING,
+                    PremiumRefundRequest.Status.COMPLETED,
+                ],
+            ).exists()
+        )
 
         subscription_data = None
         use_payapp = bool(
@@ -361,6 +382,7 @@ class PremiumBillingView(APIView):
         elif use_bank_transfer:
             bank_is_active = bool(
                 is_premium
+                and not bank_refund_blocks_access
                 and latest_bank_transfer.status
                 == BankTransferRequest.Status.APPROVED
                 and latest_bank_transfer.entitlement_started_at
