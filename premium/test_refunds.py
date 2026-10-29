@@ -11,7 +11,7 @@ from .models import (
     PremiumPurchase,
     PremiumRefundRequest,
 )
-from .services.refunds import calculate_prorated_refund
+from .services.refunds import calculate_prorated_refund, reject_refund_request
 
 
 User = get_user_model()
@@ -66,14 +66,35 @@ class PremiumRefundRequestAPITests(APITestCase):
         self.assertEqual(refund_request.requested_amount, 2380)
         self.assertEqual(refund_request.currency_code, "KRW")
 
-    def test_request_does_not_revoke_before_paddle_approval(self):
+    def test_request_immediately_suspends_premium_access(self):
         response = self.client.post(self.url, self.payload, format="json")
 
         self.assertEqual(response.status_code, status.HTTP_201_CREATED)
         self.purchase.refresh_from_db()
         self.entitlement.refresh_from_db()
         self.assertEqual(self.purchase.status, PremiumPurchase.Status.COMPLETED)
-        self.assertTrue(self.entitlement.is_active())
+        self.assertFalse(self.entitlement.is_active())
+        self.assertIsNotNone(response.data["accessSuspendedAt"])
+
+    def test_rejection_restores_remaining_access_from_rejection_time(self):
+        self.client.post(self.url, self.payload, format="json")
+        refund_request = PremiumRefundRequest.objects.get(user=self.user)
+        rejected_at = timezone.now() + timedelta(hours=1)
+
+        rejected = reject_refund_request(
+            refund_request,
+            reason="환불 조건에 맞지 않습니다.",
+            rejected_at=rejected_at,
+        )
+
+        self.entitlement.refresh_from_db()
+        self.assertEqual(rejected.status, PremiumRefundRequest.Status.REJECTED)
+        self.assertIsNotNone(rejected.access_restored_at)
+        self.assertTrue(self.entitlement.is_active(rejected_at))
+        self.assertEqual(
+            int((self.entitlement.expires_at - rejected_at).total_seconds()),
+            refund_request.remaining_seconds,
+        )
 
     def test_duplicate_request_is_rejected(self):
         first = self.client.post(self.url, self.payload, format="json")

@@ -178,6 +178,8 @@ class PremiumRefundRequest(models.Model):
         default=Status.REQUESTED,
     )
     rejection_reason = models.CharField(max_length=255, blank=True)
+    access_suspended_at = models.DateTimeField(null=True, blank=True)
+    access_restored_at = models.DateTimeField(null=True, blank=True)
     completed_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     modified_at = models.DateTimeField(auto_now=True)

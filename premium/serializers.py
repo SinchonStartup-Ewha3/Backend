@@ -208,6 +208,14 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
         read_only=True,
     )
     requestedAt = serializers.DateTimeField(source="created_at", read_only=True)
+    accessSuspendedAt = serializers.DateTimeField(
+        source="access_suspended_at",
+        read_only=True,
+    )
+    accessRestoredAt = serializers.DateTimeField(
+        source="access_restored_at",
+        read_only=True,
+    )
     completedAt = serializers.DateTimeField(source="completed_at", read_only=True)
     rejectionReason = serializers.CharField(
         source="rejection_reason",
@@ -229,6 +237,8 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
             "status",
             "rejectionReason",
             "requestedAt",
+            "accessSuspendedAt",
+            "accessRestoredAt",
             "completedAt",
         ]
         read_only_fields = ["status"]
