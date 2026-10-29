@@ -2,6 +2,7 @@ from django.utils import timezone
 from rest_framework import serializers
 
 from .models import (
+    BankTransferRequest,
     NotificationPreference,
     PremiumProfile,
     PremiumRefundRequest,
@@ -134,9 +135,53 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         ]
 
 
+class BankTransferRequestSerializer(serializers.ModelSerializer):
+    requestId = serializers.IntegerField(source="pk", read_only=True)
+    depositorName = serializers.CharField(
+        source="depositor_name",
+        max_length=30,
+    )
+    currencyCode = serializers.CharField(
+        source="currency_code",
+        read_only=True,
+    )
+    requestedAt = serializers.DateTimeField(
+        source="created_at",
+        read_only=True,
+    )
+    reviewedAt = serializers.DateTimeField(
+        source="reviewed_at",
+        read_only=True,
+    )
+
+    class Meta:
+        model = BankTransferRequest
+        fields = [
+            "requestId",
+            "depositorName",
+            "amount",
+            "currencyCode",
+            "status",
+            "requestedAt",
+            "reviewedAt",
+        ]
+        read_only_fields = ["amount", "status"]
+
+    def validate_depositorName(self, value):
+        value = value.strip()
+        if len(value) < 2:
+            raise serializers.ValidationError("입금자명을 2자 이상 입력해주세요.")
+        return value
+
+
 class PremiumRefundRequestSerializer(serializers.ModelSerializer):
     refundRequestId = serializers.IntegerField(source="pk", read_only=True)
     purchaseId = serializers.IntegerField(source="purchase_id", read_only=True)
+    bankTransferRequestId = serializers.IntegerField(
+        source="bank_transfer_request_id",
+        read_only=True,
+    )
+    paymentMethod = serializers.SerializerMethodField()
     reason = serializers.CharField(
         max_length=500,
         allow_blank=False,
@@ -174,6 +219,8 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
         fields = [
             "refundRequestId",
             "purchaseId",
+            "bankTransferRequestId",
+            "paymentMethod",
             "reason",
             "requestedAmount",
             "currencyCode",
@@ -185,3 +232,6 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
             "completedAt",
         ]
         read_only_fields = ["status"]
+
+    def get_paymentMethod(self, obj):
+        return "BANK_TRANSFER" if obj.bank_transfer_request_id else "PADDLE"

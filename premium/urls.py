@@ -1,6 +1,7 @@
 from django.urls import path
 
 from .views import (
+    BankTransferRequestView,
     NotificationPreferenceView,
     PaddleWebhookView,
     PremiumBillingView,
@@ -17,6 +18,11 @@ urlpatterns = [
     path("status/", PremiumStatusView.as_view(), name="status"),
     path("billing/", PremiumBillingView.as_view(), name="billing"),
     path("checkout/", PremiumCheckoutView.as_view(), name="checkout"),
+    path(
+        "bank-transfer-requests/",
+        BankTransferRequestView.as_view(),
+        name="bank-transfer-request",
+    ),
     path(
         "refund-requests/",
         PremiumRefundRequestView.as_view(),

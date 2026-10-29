@@ -1,5 +1,6 @@
 from django.conf import settings
 from django.db import models
+from django.db.models import Q
 from django.utils import timezone
 
 
@@ -84,6 +85,58 @@ class PremiumPurchase(models.Model):
         return f"{self.user_id} - {self.paddle_transaction_id or self.pk}"
 
 
+class BankTransferRequest(models.Model):
+    """사용자가 직접 계좌이체 후 등록한 입금 확인 요청."""
+
+    class Status(models.TextChoices):
+        PENDING = "PENDING", "입금 확인 중"
+        APPROVED = "APPROVED", "입금 승인"
+        REJECTED = "REJECTED", "입금 거절"
+        CANCELED = "CANCELED", "사용자 취소"
+        REFUNDED = "REFUNDED", "환불 완료"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.CASCADE,
+        related_name="bank_transfer_requests",
+    )
+    depositor_name = models.CharField(max_length=30)
+    amount = models.PositiveIntegerField(default=2500)
+    currency_code = models.CharField(max_length=3, default="KRW")
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.PENDING,
+    )
+    entitlement_started_at = models.DateTimeField(null=True, blank=True)
+    entitlement_expires_at = models.DateTimeField(null=True, blank=True)
+    reviewed_by = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="reviewed_bank_transfer_requests",
+    )
+    reviewed_at = models.DateTimeField(null=True, blank=True)
+    refunded_at = models.DateTimeField(null=True, blank=True)
+    admin_note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["user"],
+                condition=Q(status="PENDING"),
+                name="uniq_pending_bank_user",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user.nickname} - {self.depositor_name} - {self.status}"
+
+
 class PremiumRefundRequest(models.Model):
     """운영진이 Paddle 대시보드에서 처리하는 프리미엄 환불 요청."""
 
@@ -104,6 +157,15 @@ class PremiumRefundRequest(models.Model):
         PremiumPurchase,
         on_delete=models.PROTECT,
         related_name="refund_request",
+        null=True,
+        blank=True,
+    )
+    bank_transfer_request = models.OneToOneField(
+        BankTransferRequest,
+        on_delete=models.PROTECT,
+        related_name="refund_request",
+        null=True,
+        blank=True,
     )
     reason = models.CharField(max_length=500)
     requested_amount = models.PositiveIntegerField()
@@ -128,9 +190,19 @@ class PremiumRefundRequest(models.Model):
                 name="premium_refund_user_idx",
             ),
         ]
+        constraints = [
+            models.CheckConstraint(
+                condition=(
+                    Q(purchase__isnull=False, bank_transfer_request__isnull=True)
+                    | Q(purchase__isnull=True, bank_transfer_request__isnull=False)
+                ),
+                name="refund_exactly_one_payment_source",
+            ),
+        ]
 
     def __str__(self):
-        return f"{self.user_id} - {self.purchase_id} - {self.status}"
+        payment_id = self.purchase_id or self.bank_transfer_request_id
+        return f"{self.user_id} - {payment_id} - {self.status}"
 
 
 class PaddleWebhookEvent(models.Model):
