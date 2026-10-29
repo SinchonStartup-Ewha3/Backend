@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.db import models
 from django.utils import timezone
@@ -82,6 +84,82 @@ class PremiumPurchase(models.Model):
 
     def __str__(self):
         return f"{self.user_id} - {self.paddle_transaction_id or self.pk}"
+
+
+class PayAppPayment(models.Model):
+    """PayApp 일회성 결제 요청과 Premium 권한 지급 이력."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "REQUESTED", "결제 요청"
+        WAITING = "WAITING", "결제 대기"
+        COMPLETED = "COMPLETED", "결제 완료"
+        FAILED = "FAILED", "결제 요청 실패"
+        REQUEST_CANCELED = "REQUEST_CANCELED", "결제 요청 취소"
+        APPROVAL_CANCELED = "APPROVAL_CANCELED", "결제 승인 취소"
+        PARTIALLY_CANCELED = "PARTIALLY_CANCELED", "부분 취소"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="payapp_payments",
+    )
+    order_token = models.UUIDField(default=uuid.uuid4, unique=True, editable=False)
+    mul_no = models.CharField(max_length=64, unique=True, null=True, blank=True)
+    pay_url = models.URLField(max_length=500, blank=True)
+    product_name = models.CharField(max_length=100)
+    amount = models.PositiveIntegerField()
+    currency_code = models.CharField(max_length=3, default="KRW")
+    buyer_phone_masked = models.CharField(max_length=20, blank=True)
+    status = models.CharField(
+        max_length=30,
+        choices=Status.choices,
+        default=Status.REQUESTED,
+    )
+    provider_state = models.CharField(max_length=10, blank=True)
+    entitlement_started_at = models.DateTimeField(null=True, blank=True)
+    entitlement_expires_at = models.DateTimeField(null=True, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    provider_canceled_at = models.DateTimeField(null=True, blank=True)
+    refund_confirmed_at = models.DateTimeField(null=True, blank=True)
+    failure_reason = models.CharField(max_length=255, blank=True)
+    admin_note = models.CharField(max_length=255, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        indexes = [
+            models.Index(
+                fields=["user", "status", "created_at"],
+                name="payapp_payment_user_idx",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.user_id} - {self.mul_no or self.order_token}"
+
+
+class PayAppFeedbackEvent(models.Model):
+    """민감정보를 제외한 PayApp 통보 처리 및 멱등성 기록."""
+
+    event_key = models.CharField(max_length=64, primary_key=True)
+    payment = models.ForeignKey(
+        PayAppPayment,
+        on_delete=models.PROTECT,
+        related_name="feedback_events",
+    )
+    mul_no = models.CharField(max_length=64)
+    pay_state = models.CharField(max_length=10)
+    responsedate = models.CharField(max_length=14)
+    price = models.PositiveIntegerField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-received_at"]
+
+    def __str__(self):
+        return f"{self.mul_no}: {self.pay_state}"
 
 
 class PremiumRefundRequest(models.Model):

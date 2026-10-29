@@ -4,6 +4,7 @@ import math
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -12,6 +13,7 @@ from rest_framework.views import APIView
 
 from .models import (
     NotificationPreference,
+    PayAppPayment,
     PremiumEntitlement,
     PremiumProfile,
     PremiumPurchase,
@@ -20,6 +22,7 @@ from .models import (
 from .permissions import HasActivePremium
 from .serializers import (
     NotificationPreferenceSerializer,
+    PayAppCheckoutSerializer,
     PremiumProfileSerializer,
     PremiumRefundRequestSerializer,
 )
@@ -30,6 +33,15 @@ from .services.paddle import (
     create_transaction,
     validate_paddle_settings,
     verify_webhook_signature,
+)
+from .services.payapp import (
+    PayAppAPIError,
+    PayAppConfigurationError,
+    PayAppFeedbackValidationError,
+    create_payment_request,
+    mask_phone,
+    process_feedback,
+    validate_payapp_settings,
 )
 from .services.webhooks import PaddleWebhookValidationError, process_webhook
 
@@ -111,9 +123,33 @@ class PremiumStatusView(APIView):
                 0,
                 math.ceil((entitlement.expires_at - now).total_seconds()),
             )
+        active_payapp_payment = PayAppPayment.objects.filter(
+            user=request.user,
+            entitlement_started_at__lte=now,
+            entitlement_expires_at__gt=now,
+        ).exists()
+        active_paddle_purchase = PremiumPurchase.objects.filter(
+            user=request.user,
+            status__in=[
+                PremiumPurchase.Status.COMPLETED,
+                PremiumPurchase.Status.PARTIALLY_REFUNDED,
+            ],
+            revoked_at__isnull=True,
+            entitlement_started_at__lte=now,
+            entitlement_expires_at__gt=now,
+        ).exists()
+        if active_payapp_payment:
+            payment_method = "PAYAPP"
+        elif active_paddle_purchase:
+            payment_method = "PADDLE"
+        elif is_premium:
+            payment_method = "MANUAL"
+        else:
+            payment_method = None
         return Response(
             {
                 "isPremium": is_premium,
+                "paymentMethod": payment_method,
                 "premiumStartedAt": entitlement.started_at if entitlement else None,
                 "premiumExpiresAt": entitlement.expires_at if entitlement else None,
                 "remainingSeconds": remaining_seconds,
@@ -210,6 +246,78 @@ class PremiumCheckoutView(APIView):
                 "transactionId": purchase.paddle_transaction_id,
                 "checkoutUrl": checkout.get("url"),
                 "status": purchase.status,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PayAppCheckoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PayAppCheckoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            validate_payapp_settings()
+        except PayAppConfigurationError as exc:
+            return Response(
+                {"detail": str(exc), "code": "PAYAPP_NOT_CONFIGURED"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        recvphone = serializer.validated_data["recvphone"]
+        payment = PayAppPayment.objects.create(
+            user=request.user,
+            product_name=settings.PAYAPP_PRODUCT_NAME,
+            amount=settings.PAYAPP_PREMIUM_AMOUNT,
+            currency_code=settings.PAYAPP_PREMIUM_CURRENCY,
+            buyer_phone_masked=mask_phone(recvphone),
+        )
+        try:
+            payapp_response = create_payment_request(
+                payment=payment,
+                recvphone=recvphone,
+            )
+        except (PayAppAPIError, PayAppConfigurationError) as exc:
+            payment.status = PayAppPayment.Status.FAILED
+            payment.failure_reason = str(exc)[:255]
+            payment.save(update_fields=["status", "failure_reason", "modified_at"])
+            return Response(
+                {"detail": str(exc), "code": "PAYAPP_PAYMENT_REQUEST_FAILED"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        payment.mul_no = str(payapp_response["mul_no"])
+        payment.pay_url = payapp_response["payurl"]
+        try:
+            payment.save(update_fields=["mul_no", "pay_url", "modified_at"])
+        except IntegrityError:
+            payment.mul_no = None
+            payment.pay_url = ""
+            payment.status = PayAppPayment.Status.FAILED
+            payment.failure_reason = "이미 처리된 PayApp 결제요청번호가 반환되었습니다."
+            payment.save(
+                update_fields=[
+                    "mul_no",
+                    "pay_url",
+                    "status",
+                    "failure_reason",
+                    "modified_at",
+                ]
+            )
+            return Response(
+                {
+                    "detail": payment.failure_reason,
+                    "code": "PAYAPP_DUPLICATE_MUL_NO",
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(
+            {
+                "paymentId": payment.pk,
+                "mulNo": payment.mul_no,
+                "paymentUrl": payment.pay_url,
+                "status": payment.status,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -349,3 +457,34 @@ class PaddleWebhookView(APIView):
             )
             raise
         return Response({"ok": True, "duplicate": duplicate})
+
+
+class PayAppFeedbackView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            validate_payapp_settings()
+        except PayAppConfigurationError:
+            return HttpResponse(
+                "FAIL",
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content_type="text/plain; charset=utf-8",
+            )
+
+        data = (
+            request.data.dict()
+            if hasattr(request.data, "dict")
+            else dict(request.data)
+        )
+        try:
+            process_feedback(data)
+        except PayAppFeedbackValidationError as exc:
+            logger.warning("PayApp feedback rejected: %s", exc)
+            return HttpResponse(
+                "FAIL",
+                status=status.HTTP_400_BAD_REQUEST,
+                content_type="text/plain; charset=utf-8",
+            )
+        return HttpResponse("SUCCESS", content_type="text/plain; charset=utf-8")

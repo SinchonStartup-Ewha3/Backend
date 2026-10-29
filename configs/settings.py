@@ -88,6 +88,22 @@ PADDLE_PREMIUM_AMOUNT = 2500
 PADDLE_PREMIUM_CURRENCY = "KRW"
 PADDLE_PREMIUM_DURATION_DAYS = 21
 
+# PayApp one-time payment (credentials are supplied only through env files)
+PAYAPP_API_URL = "https://api.payapp.kr/oapi/v2"
+PAYAPP_USER_ID = env("PAYAPP_USER_ID", default="")
+PAYAPP_LINK_KEY = env("PAYAPP_LINK_KEY", default="")
+PAYAPP_LINK_VALUE = env("PAYAPP_LINK_VALUE", default="")
+PAYAPP_REQUEST_KEY = env("PAYAPP_REQUEST_KEY", default="")
+PAYAPP_FEEDBACK_URL = env("PAYAPP_FEEDBACK_URL", default="")
+PAYAPP_RETURN_URL = env("PAYAPP_RETURN_URL", default="")
+PAYAPP_OPEN_PAY_TYPE = env("PAYAPP_OPEN_PAY_TYPE", default="")
+PAYAPP_PRODUCT_NAME = "WEE Premium"
+PAYAPP_ORDER_TAG = "WEE_PREMIUM_21D"
+PAYAPP_PREMIUM_AMOUNT = 2500
+PAYAPP_PREMIUM_CURRENCY = "KRW"
+PAYAPP_PREMIUM_DURATION_DAYS = 21
+PAYAPP_TIMEOUT_SECONDS = env.int("PAYAPP_TIMEOUT_SECONDS", default=10)
+
 # 커뮤니티 날씨 문구 생성에 사용할 LINER 모델
 # 운영 중 문구 스타일이 갑자기 바뀌지 않도록 버전을 고정합니다.
 LINER_COMMUNITY_MODEL = env(

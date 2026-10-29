@@ -3,6 +3,8 @@ from django.utils import timezone
 
 from .models import (
     PaddleWebhookEvent,
+    PayAppFeedbackEvent,
+    PayAppPayment,
     PremiumEntitlement,
     PremiumPurchase,
     PremiumRefundRequest,
@@ -30,6 +32,78 @@ class PremiumPurchaseAdmin(admin.ModelAdmin):
     list_filter = ("status", "currency_code")
     search_fields = ("user__nickname", "paddle_transaction_id")
     readonly_fields = ("created_at", "modified_at")
+
+
+@admin.register(PayAppPayment)
+class PayAppPaymentAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "mul_no",
+        "status",
+        "amount",
+        "provider_state",
+        "created_at",
+    )
+    list_filter = ("status", "provider_state", "currency_code")
+    search_fields = ("user__nickname", "mul_no", "order_token")
+    readonly_fields = (
+        "user",
+        "order_token",
+        "mul_no",
+        "pay_url",
+        "product_name",
+        "amount",
+        "currency_code",
+        "buyer_phone_masked",
+        "status",
+        "provider_state",
+        "entitlement_started_at",
+        "entitlement_expires_at",
+        "completed_at",
+        "provider_canceled_at",
+        "failure_reason",
+        "created_at",
+        "modified_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
+
+
+@admin.register(PayAppFeedbackEvent)
+class PayAppFeedbackEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "event_key",
+        "payment",
+        "mul_no",
+        "pay_state",
+        "price",
+        "received_at",
+    )
+    list_filter = ("pay_state",)
+    search_fields = ("event_key", "mul_no", "payment__order_token")
+    readonly_fields = (
+        "event_key",
+        "payment",
+        "mul_no",
+        "pay_state",
+        "responsedate",
+        "price",
+        "received_at",
+    )
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(PremiumRefundRequest)

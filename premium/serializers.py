@@ -136,6 +136,16 @@ class NotificationPreferenceSerializer(serializers.ModelSerializer):
         ]
 
 
+class PayAppCheckoutSerializer(serializers.Serializer):
+    recvphone = serializers.RegexField(
+        regex=r"^01[016789]\d{7,8}$",
+        max_length=11,
+        error_messages={
+            "invalid": "휴대전화 번호는 하이픈 없이 입력해주세요.",
+        },
+    )
+
+
 class PremiumRefundRequestSerializer(serializers.ModelSerializer):
     refundRequestId = serializers.IntegerField(source="pk", read_only=True)
     purchaseId = serializers.IntegerField(source="purchase_id", read_only=True)
