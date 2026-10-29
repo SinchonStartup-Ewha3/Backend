@@ -4,6 +4,7 @@ import math
 
 from django.conf import settings
 from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.utils import timezone
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated
@@ -13,6 +14,7 @@ from rest_framework.views import APIView
 from .models import (
     BankTransferRequest,
     NotificationPreference,
+    PayAppPayment,
     PremiumEntitlement,
     PremiumProfile,
     PremiumPurchase,
@@ -22,6 +24,7 @@ from .permissions import CanAccessPremiumSurvey, HasActivePremium
 from .serializers import (
     BankTransferRequestSerializer,
     NotificationPreferenceSerializer,
+    PayAppCheckoutSerializer,
     PremiumProfileSerializer,
     PremiumRefundRequestSerializer,
 )
@@ -37,6 +40,15 @@ from .services.refunds import (
     RefundCalculationError,
     calculate_prorated_refund,
     suspend_refund_access,
+)
+from .services.payapp import (
+    PayAppAPIError,
+    PayAppConfigurationError,
+    PayAppFeedbackValidationError,
+    create_payment_request,
+    mask_phone,
+    process_feedback,
+    validate_payapp_settings,
 )
 from .services.webhooks import PaddleWebhookValidationError, process_webhook
 
@@ -131,9 +143,24 @@ class PremiumStatusView(APIView):
         bank_transfer_status = (
             latest_bank_transfer.status if latest_bank_transfer else None
         )
-        active_bank_transfer = BankTransferRequest.objects.filter(
+        active_bank_transfer = is_premium and (
+            BankTransferRequest.objects.filter(
+                user=request.user,
+                status=BankTransferRequest.Status.APPROVED,
+                entitlement_started_at__lte=now,
+                entitlement_expires_at__gt=now,
+            )
+            .exclude(
+                refund_request__status__in=[
+                    PremiumRefundRequest.Status.REQUESTED,
+                    PremiumRefundRequest.Status.PROCESSING,
+                    PremiumRefundRequest.Status.COMPLETED,
+                ]
+            )
+            .exists()
+        )
+        active_payapp_payment = PayAppPayment.objects.filter(
             user=request.user,
-            status=BankTransferRequest.Status.APPROVED,
             entitlement_started_at__lte=now,
             entitlement_expires_at__gt=now,
         ).exists()
@@ -149,6 +176,8 @@ class PremiumStatusView(APIView):
         ).exists()
         if active_bank_transfer:
             payment_method = "BANK_TRANSFER"
+        elif active_payapp_payment:
+            payment_method = "PAYAPP"
         elif active_paddle_purchase:
             payment_method = "PADDLE"
         elif is_premium:
@@ -269,6 +298,14 @@ class PremiumBillingView(APIView):
             .order_by("-reviewed_at", "-pk")
             .first()
         )
+        latest_payapp_payment = (
+            PayAppPayment.objects.filter(
+                user=request.user,
+                completed_at__isnull=False,
+            )
+            .order_by("-completed_at", "-pk")
+            .first()
+        )
         paddle_can_refund = (
             PremiumPurchase.objects.filter(
                 user=request.user,
@@ -284,18 +321,70 @@ class PremiumBillingView(APIView):
             entitlement_expires_at__gt=now,
             refund_request__isnull=True,
         ).exists()
+        bank_refund_blocks_access = bool(
+            latest_bank_transfer
+            and PremiumRefundRequest.objects.filter(
+                bank_transfer_request=latest_bank_transfer,
+                status__in=[
+                    PremiumRefundRequest.Status.REQUESTED,
+                    PremiumRefundRequest.Status.PROCESSING,
+                    PremiumRefundRequest.Status.COMPLETED,
+                ],
+            ).exists()
+        )
 
         subscription_data = None
+        use_payapp = bool(
+            latest_payapp_payment
+            and (
+                latest_purchase is None
+                or latest_payapp_payment.completed_at >= latest_purchase.completed_at
+            )
+            and (
+                latest_bank_transfer is None
+                or latest_payapp_payment.completed_at >= latest_bank_transfer.reviewed_at
+            )
+        )
         use_bank_transfer = bool(
             latest_bank_transfer
             and (
                 latest_purchase is None
                 or latest_bank_transfer.reviewed_at >= latest_purchase.completed_at
             )
+            and (
+                latest_payapp_payment is None
+                or latest_bank_transfer.reviewed_at
+                >= latest_payapp_payment.completed_at
+            )
         )
-        if use_bank_transfer:
+        if use_payapp:
+            payapp_is_active = bool(
+                is_premium
+                and latest_payapp_payment.entitlement_started_at
+                and latest_payapp_payment.entitlement_expires_at
+                and latest_payapp_payment.entitlement_started_at <= now
+                < latest_payapp_payment.entitlement_expires_at
+            )
+            subscription_data = {
+                "purchaseId": None,
+                "bankTransferRequestId": None,
+                "payAppPaymentId": latest_payapp_payment.pk,
+                "paymentMethod": "PAYAPP",
+                "productName": latest_payapp_payment.product_name,
+                "status": latest_payapp_payment.status,
+                "purchasedAt": latest_payapp_payment.completed_at,
+                "startedAt": latest_payapp_payment.entitlement_started_at,
+                "expiresAt": latest_payapp_payment.entitlement_expires_at,
+                "isActive": payapp_is_active,
+                "remainingSeconds": remaining_seconds if payapp_is_active else 0,
+                "canRequestRefund": False,
+            }
+        elif use_bank_transfer:
             bank_is_active = bool(
-                latest_bank_transfer.status == BankTransferRequest.Status.APPROVED
+                is_premium
+                and not bank_refund_blocks_access
+                and latest_bank_transfer.status
+                == BankTransferRequest.Status.APPROVED
                 and latest_bank_transfer.entitlement_started_at
                 and latest_bank_transfer.entitlement_expires_at
                 and latest_bank_transfer.entitlement_started_at <= now
@@ -370,6 +459,78 @@ class PremiumCheckoutView(APIView):
                 "transactionId": purchase.paddle_transaction_id,
                 "checkoutUrl": checkout.get("url"),
                 "status": purchase.status,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class PayAppCheckoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = PayAppCheckoutSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            validate_payapp_settings()
+        except PayAppConfigurationError as exc:
+            return Response(
+                {"detail": str(exc), "code": "PAYAPP_NOT_CONFIGURED"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        recvphone = serializer.validated_data["recvphone"]
+        payment = PayAppPayment.objects.create(
+            user=request.user,
+            product_name=settings.PAYAPP_PRODUCT_NAME,
+            amount=settings.PAYAPP_PREMIUM_AMOUNT,
+            currency_code=settings.PAYAPP_PREMIUM_CURRENCY,
+            buyer_phone_masked=mask_phone(recvphone),
+        )
+        try:
+            payapp_response = create_payment_request(
+                payment=payment,
+                recvphone=recvphone,
+            )
+        except (PayAppAPIError, PayAppConfigurationError) as exc:
+            payment.status = PayAppPayment.Status.FAILED
+            payment.failure_reason = str(exc)[:255]
+            payment.save(update_fields=["status", "failure_reason", "modified_at"])
+            return Response(
+                {"detail": str(exc), "code": "PAYAPP_PAYMENT_REQUEST_FAILED"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        payment.mul_no = str(payapp_response["mul_no"])
+        payment.pay_url = payapp_response["payurl"]
+        try:
+            payment.save(update_fields=["mul_no", "pay_url", "modified_at"])
+        except IntegrityError:
+            payment.mul_no = None
+            payment.pay_url = ""
+            payment.status = PayAppPayment.Status.FAILED
+            payment.failure_reason = "이미 처리된 PayApp 결제요청번호가 반환되었습니다."
+            payment.save(
+                update_fields=[
+                    "mul_no",
+                    "pay_url",
+                    "status",
+                    "failure_reason",
+                    "modified_at",
+                ]
+            )
+            return Response(
+                {
+                    "detail": payment.failure_reason,
+                    "code": "PAYAPP_DUPLICATE_MUL_NO",
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+        return Response(
+            {
+                "paymentId": payment.pk,
+                "mulNo": payment.mul_no,
+                "paymentUrl": payment.pay_url,
+                "status": payment.status,
             },
             status=status.HTTP_201_CREATED,
         )
@@ -555,3 +716,34 @@ class PaddleWebhookView(APIView):
             )
             raise
         return Response({"ok": True, "duplicate": duplicate})
+
+
+class PayAppFeedbackView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            validate_payapp_settings()
+        except PayAppConfigurationError:
+            return HttpResponse(
+                "FAIL",
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content_type="text/plain; charset=utf-8",
+            )
+
+        data = (
+            request.data.dict()
+            if hasattr(request.data, "dict")
+            else dict(request.data)
+        )
+        try:
+            process_feedback(data)
+        except PayAppFeedbackValidationError as exc:
+            logger.warning("PayApp feedback rejected: %s", exc)
+            return HttpResponse(
+                "FAIL",
+                status=status.HTTP_400_BAD_REQUEST,
+                content_type="text/plain; charset=utf-8",
+            )
+        return HttpResponse("SUCCESS", content_type="text/plain; charset=utf-8")
