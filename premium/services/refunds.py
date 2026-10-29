@@ -50,6 +50,115 @@ def calculate_prorated_refund(purchase, *, requested_at):
     )
 
 
+def _refund_user(refund_request):
+    if refund_request.user_id:
+        return refund_request.user
+    if refund_request.purchase_id:
+        return refund_request.purchase.user
+    return refund_request.bank_transfer_request.user
+
+
+def _refund_source(refund_request):
+    return (
+        refund_request.purchase
+        if refund_request.purchase_id
+        else refund_request.bank_transfer_request
+    )
+
+
+def _source_unused_duration(refund_request, at):
+    source = _refund_source(refund_request)
+    unused_from = max(at, source.entitlement_started_at)
+    return max(
+        timedelta(0),
+        source.entitlement_expires_at - unused_from,
+    )
+
+
+@transaction.atomic
+def suspend_refund_access(refund_request, *, suspended_at=None):
+    """환불 심사 중 해당 결제에서 남은 프리미엄 기간을 일시 회수한다."""
+    suspended_at = suspended_at or timezone.now()
+    locked_request = (
+        PremiumRefundRequest.objects.select_for_update()
+        .select_related("user", "purchase__user", "bank_transfer_request__user")
+        .get(pk=refund_request.pk)
+    )
+    if locked_request.access_suspended_at is not None:
+        return locked_request
+
+    user = _refund_user(locked_request)
+    entitlement = (
+        PremiumEntitlement.objects.select_for_update()
+        .filter(user=user)
+        .first()
+    )
+    if entitlement and entitlement.expires_at and entitlement.expires_at > suspended_at:
+        suspended_duration = _source_unused_duration(
+            locked_request,
+            suspended_at,
+        )
+        entitlement.expires_at = max(
+            suspended_at,
+            entitlement.expires_at - suspended_duration,
+        )
+        entitlement.save(update_fields=["expires_at", "modified_at"])
+
+    locked_request.access_suspended_at = suspended_at
+    locked_request.save(update_fields=["access_suspended_at", "modified_at"])
+    return locked_request
+
+
+@transaction.atomic
+def reject_refund_request(refund_request, *, reason, rejected_at=None):
+    """환불 거절 시 요청 때 회수한 잔여 이용 시간을 사용자에게 복원한다."""
+    rejected_at = rejected_at or timezone.now()
+    locked_request = (
+        PremiumRefundRequest.objects.select_for_update()
+        .select_related("user", "purchase__user", "bank_transfer_request__user")
+        .get(pk=refund_request.pk)
+    )
+    if locked_request.status == PremiumRefundRequest.Status.COMPLETED:
+        raise RefundCalculationError("완료된 환불 요청은 거절할 수 없습니다.")
+    if locked_request.status == PremiumRefundRequest.Status.REJECTED:
+        return locked_request
+
+    if (
+        locked_request.access_suspended_at is not None
+        and locked_request.access_restored_at is None
+    ):
+        user = _refund_user(locked_request)
+        entitlement, _ = (
+            PremiumEntitlement.objects.select_for_update()
+            .get_or_create(user=user)
+        )
+        restored_duration = _source_unused_duration(
+            locked_request,
+            locked_request.access_suspended_at,
+        )
+        if entitlement.is_active(rejected_at):
+            entitlement.expires_at += restored_duration
+        else:
+            entitlement.started_at = rejected_at
+            entitlement.expires_at = rejected_at + restored_duration
+        entitlement.save(
+            update_fields=["started_at", "expires_at", "modified_at"],
+        )
+        locked_request.access_restored_at = rejected_at
+
+    locked_request.status = PremiumRefundRequest.Status.REJECTED
+    locked_request.rejection_reason = reason
+    locked_request.save(
+        update_fields=[
+            "status",
+            "rejection_reason",
+            "access_restored_at",
+            "modified_at",
+        ]
+    )
+    return locked_request
+
+
 @transaction.atomic
 def complete_bank_transfer_refund(refund_request, *, completed_at=None):
     """관리자가 송금을 마친 계좌이체 환불 요청을 완료 처리한다."""
@@ -75,7 +184,8 @@ def complete_bank_transfer_refund(refund_request, *, completed_at=None):
         .first()
     )
     if (
-        entitlement
+        locked_request.access_suspended_at is None
+        and entitlement
         and entitlement.expires_at
         and entitlement.expires_at > completed_at
     ):

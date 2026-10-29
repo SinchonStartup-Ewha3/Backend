@@ -13,6 +13,7 @@ from premium.models import (
 )
 
 from .entitlements import revoke_unused_entitlement
+from .refunds import reject_refund_request
 
 
 class PaddleWebhookValidationError(Exception):
@@ -191,16 +192,14 @@ def _process_adjustment(data, occurred_at):
         return
 
     if refund_request is not None and adjustment_status == "rejected":
-        refund_request.status = PremiumRefundRequest.Status.REJECTED
         refund_request.paddle_adjustment_id = adjustment_id
-        refund_request.rejection_reason = "Paddle에서 환불 요청을 승인하지 않았습니다."
         refund_request.save(
-            update_fields=[
-                "status",
-                "paddle_adjustment_id",
-                "rejection_reason",
-                "modified_at",
-            ]
+            update_fields=["paddle_adjustment_id", "modified_at"]
+        )
+        reject_refund_request(
+            refund_request,
+            reason="Paddle에서 환불 요청을 승인하지 않았습니다.",
+            rejected_at=occurred_at,
         )
         return
 
@@ -225,7 +224,10 @@ def _process_adjustment(data, occurred_at):
         ):
             return
 
-    revoke_unused_entitlement(purchase, occurred_at)
+    if refund_request is None or refund_request.access_suspended_at is None:
+        revoke_unused_entitlement(purchase, occurred_at)
+    else:
+        purchase.revoked_at = occurred_at
     purchase.status = (
         PremiumPurchase.Status.CHARGEBACK
         if action == "chargeback"

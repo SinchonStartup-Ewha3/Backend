@@ -15,6 +15,7 @@ from .services.bank_transfers import (
 from .services.refunds import (
     RefundCalculationError,
     complete_bank_transfer_refund,
+    reject_refund_request,
 )
 
 
@@ -122,6 +123,8 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
         "requested_amount",
         "currency_code",
         "remaining_seconds",
+        "access_suspended_at",
+        "access_restored_at",
         "paddle_adjustment_id",
         "status",
         "completed_at",
@@ -162,27 +165,23 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
     @admin.action(description="선택한 요청을 환불 거절로 처리")
     def mark_as_rejected(self, request, queryset):
         updated = 0
-        now = timezone.now()
         for refund_request in queryset.filter(
             status__in=[
                 PremiumRefundRequest.Status.REQUESTED,
                 PremiumRefundRequest.Status.PROCESSING,
             ]
         ):
-            refund_request.status = PremiumRefundRequest.Status.REJECTED
-            if not refund_request.rejection_reason:
-                refund_request.rejection_reason = (
-                    "운영진 검토 결과 환불 요청이 거절되었습니다."
+            try:
+                reject_refund_request(
+                    refund_request,
+                    reason=(
+                        refund_request.rejection_reason
+                        or "운영진 검토 결과 환불 요청이 거절되었습니다."
+                    ),
                 )
-            refund_request.modified_at = now
-            refund_request.save(
-                update_fields=[
-                    "status",
-                    "rejection_reason",
-                    "modified_at",
-                ]
-            )
-            updated += 1
+                updated += 1
+            except RefundCalculationError:
+                continue
         self.message_user(request, f"{updated}건을 환불 거절 처리했습니다.")
 
 

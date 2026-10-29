@@ -105,6 +105,8 @@ class BankTransferFlowTests(APITestCase):
         self.assertEqual(response.data["paymentMethod"], "BANK_TRANSFER")
         self.assertEqual(response.data["bankTransferRequestId"], transfer.pk)
         refund_request = PremiumRefundRequest.objects.get(user=self.user)
+        entitlement = PremiumEntitlement.objects.get(user=self.user)
+        self.assertFalse(entitlement.is_active())
 
         complete_bank_transfer_refund(
             refund_request,
@@ -112,6 +114,6 @@ class BankTransferFlowTests(APITestCase):
         )
 
         transfer.refresh_from_db()
-        entitlement = PremiumEntitlement.objects.get(user=self.user)
+        entitlement.refresh_from_db()
         self.assertEqual(transfer.status, BankTransferRequest.Status.REFUNDED)
         self.assertFalse(entitlement.is_active())

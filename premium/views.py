@@ -33,7 +33,11 @@ from .services.paddle import (
     validate_paddle_settings,
     verify_webhook_signature,
 )
-from .services.refunds import RefundCalculationError, calculate_prorated_refund
+from .services.refunds import (
+    RefundCalculationError,
+    calculate_prorated_refund,
+    suspend_refund_access,
+)
 from .services.webhooks import PaddleWebhookValidationError, process_webhook
 
 
@@ -466,6 +470,10 @@ class PremiumRefundRequestView(APIView):
                         currency_code=purchase.currency_code,
                         remaining_seconds=prorated_refund.remaining_seconds,
                     )
+                refund_request = suspend_refund_access(
+                    refund_request,
+                    suspended_at=now,
+                )
         except (
             PremiumPurchase.DoesNotExist,
             BankTransferRequest.DoesNotExist,
