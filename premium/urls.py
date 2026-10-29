@@ -4,6 +4,8 @@ from .views import (
     BankTransferRequestView,
     NotificationPreferenceView,
     PaddleWebhookView,
+    PayAppCheckoutView,
+    PayAppFeedbackView,
     PremiumBillingView,
     PremiumCheckoutView,
     PremiumProfileView,
@@ -24,6 +26,11 @@ urlpatterns = [
         name="bank-transfer-request",
     ),
     path(
+        "payapp/checkout/",
+        PayAppCheckoutView.as_view(),
+        name="payapp-checkout",
+    ),
+    path(
         "refund-requests/",
         PremiumRefundRequestView.as_view(),
         name="refund-request",
@@ -32,6 +39,11 @@ urlpatterns = [
         "webhooks/paddle/",
         PaddleWebhookView.as_view(),
         name="paddle-webhook",
+    ),
+    path(
+        "webhooks/payapp/",
+        PayAppFeedbackView.as_view(),
+        name="payapp-feedback",
     ),
     path("profile/", PremiumProfileView.as_view(), name="profile"),
     path(
