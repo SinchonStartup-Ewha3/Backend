@@ -60,13 +60,14 @@ def generate_community_copy(
             "targetScope가 TOMORROW이면 모든 문구가 내일 예보임을 명확히 드러내고, "
             "recentPosts는 비어 있으므로 게시판의 현재 상황을 추측하지 마세요. "
             "headlineTitle 하나에 날씨 상황과 필요한 행동을 담은 완성된 한 문장을 작성하세요. "
+            "headlineTitle 끝에는 마침표, 느낌표, 물음표를 붙이지 마세요. "
             "headlineDescription은 반드시 빈 문자열로 반환하세요. "
             "같은 날씨 정보를 반복하지 말고 불필요한 수식어를 빼세요. "
-            "premiumMessage는 headlineTitle을 반복하지 말고 actionType에 맞는 프리미엄 행동 알림 문구로 작성하세요. "
+            "premiumMessage는 headlineTitle을 반복하지 말고 actionType에 맞춰 사용자의 행동을 확인하는 친근한 질문형 문구로 작성하세요. "
             "LAUNDRY와 INDOOR_DRYING은 빨래, EXERCISE는 운동, UMBRELLA는 우산 알림, "
             "COLD는 겉옷, HYDRATION은 수분 섭취 내용을 사용하세요. "
             "headlineTitle은 30자 이하, "
-            "premiumMessage는 18자 이하의 짧은 행동 문구로 작성하세요."
+            "premiumMessage는 18자 이하로 작성하고 물음표로 끝내세요."
         ),
         "input": (
             "다음 JSON을 바탕으로 커뮤니티 화면 문구를 생성하세요. "
@@ -133,13 +134,16 @@ def generate_community_copy(
 
         title = str(
             generated.get("headlineTitle", "")
-        ).strip()
+        ).strip().rstrip(".!?。")
         description = str(
             generated.get("headlineDescription", "")
         ).strip()
         premium_message = str(
             generated.get("premiumMessage", "")
-        ).strip()
+        ).strip().rstrip(".!?。")
+
+        if premium_message:
+            premium_message = f"{premium_message[:17]}?"
 
         if not title or not premium_message:
             raise ValueError("LINER가 빈 문구를 반환했습니다.")
