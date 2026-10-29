@@ -7,6 +7,7 @@ class Post(models.Model):
         CARDIGAN = "cardigan", "가디건"
         PADDED = "padded", "패딩"
         COAT = "coat", "코트"
+        OTHER = "other", "기타"
 
     user = models.ForeignKey(
         settings.AUTH_USER_MODEL,

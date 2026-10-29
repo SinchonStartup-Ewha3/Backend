@@ -147,6 +147,39 @@ class PostAPITests(APITestCase):
         post = Post.objects.get()
         self.assertTrue(bool(post.image))
 
+    def test_create_post_with_other_tag(self):
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "content": "분류하기 어려운 옷차림",
+                "tag": "other",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
+        self.assertEqual(response.data["tag"], "other")
+        self.assertEqual(response.data["tagLabel"], "기타")
+        self.assertEqual(Post.objects.get().tag, Post.Tag.OTHER)
+
+    def test_all_tag_cannot_be_used_when_creating_post(self):
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.post(
+            self.create_url,
+            {
+                "content": "전체는 필터 전용 태그입니다.",
+                "tag": "all",
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
+        self.assertIn("tag", response.data)
+        self.assertEqual(Post.objects.count(), 0)
+
     def test_invalid_tag_is_rejected(self):
         self.client.force_authenticate(
             user=self.author,
@@ -336,7 +369,7 @@ class PostAPITests(APITestCase):
         )
 
     def test_feed_requires_tag(self):
-        # [기능] 피드 화면에서도 세 태그 중 하나를 선택해야 한다.
+        # [기능] 피드 화면에서도 조회할 태그를 선택해야 한다.
         self.client.force_authenticate(user=self.author)
 
         response = self.client.get(self.create_url)
@@ -369,6 +402,42 @@ class PostAPITests(APITestCase):
         self.assertFalse(response.data["results"][0]["isLiked"])
         self.assertNotIn("author", response.data["results"][0])
         self.assertNotIn("authorProfileImage", response.data["results"][0])
+
+    def test_feed_all_tag_returns_posts_from_every_tag(self):
+        for tag in Post.Tag:
+            Post.objects.create(
+                user=self.author,
+                content=f"{tag.label} 게시물",
+                tag=tag,
+            )
+
+        response = self.client.get(self.create_url, {"tag": "all"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], len(Post.Tag))
+        self.assertSetEqual(
+            {post["tag"] for post in response.data["results"]},
+            {tag.value for tag in Post.Tag},
+        )
+
+    def test_feed_filters_posts_by_other_tag(self):
+        Post.objects.create(
+            user=self.author,
+            content="기타 게시물",
+            tag=Post.Tag.OTHER,
+        )
+        Post.objects.create(
+            user=self.author,
+            content="코트 게시물",
+            tag=Post.Tag.COAT,
+        )
+
+        response = self.client.get(self.create_url, {"tag": "other"})
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data["count"], 1)
+        self.assertEqual(response.data["results"][0]["tag"], "other")
+        self.assertEqual(response.data["results"][0]["tagLabel"], "기타")
 
     def test_guest_can_retrieve_feed(self):
         post = Post.objects.create(

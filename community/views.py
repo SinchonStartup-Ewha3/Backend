@@ -28,6 +28,9 @@ from .services.weather_copy import (
 )
 
 
+ALL_POSTS_TAG = "all"
+
+
 def _post_queryset(user):
     """게시글 조회에 공감 수와 현재 사용자의 공감 여부를 추가한다."""
 
@@ -67,11 +70,17 @@ class PostListCreateView(generics.ListCreateAPIView):
         if not tag:
             raise ValidationError({"tag": "조회할 태그를 선택해주세요."})
 
-        allowed_tags = {choice.value for choice in Post.Tag}
+        allowed_tags = {
+            ALL_POSTS_TAG,
+            *(choice.value for choice in Post.Tag),
+        }
         if tag not in allowed_tags:
             raise ValidationError({
-                "tag": "가디건, 패딩, 코트 중 하나를 선택해주세요."
+                "tag": "전체, 가디건, 패딩, 코트, 기타 중 하나를 선택해주세요."
             })
+
+        if tag == ALL_POSTS_TAG:
+            return queryset
 
         return queryset.filter(tag=tag)
 
