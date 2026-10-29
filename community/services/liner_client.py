@@ -54,20 +54,24 @@ def generate_community_copy(
             "게시글에 없는 사실을 만들거나 날씨를 과장하지 마세요. "
             "사용자 닉네임은 절대 넣지 마세요. "
             "지역명, 주소, 구·동 등 행정구역 명칭을 문구에 넣지 마세요. "
-            "정보형, 공감형, 질문형, 관찰형, 가벼운 대화형 중 상황에 맞는 문체를 선택하세요. "
-            "항상 같은 문장 구조를 반복하지 말고 '오늘은', '추천해요', '챙겨주세요'를 연속해서 사용하지 마세요. "
-            "질문형은 정보 전달에 도움이 될 때만 자연스럽게 사용하세요. "
+            "친구가 날씨를 알려주듯 부드럽고 자연스러운 대화체를 사용하세요. "
+            "'예보돼', '필요합니다', '주의하세요', '챙겨 나가세요'처럼 딱딱한 안내 방송체는 피하세요. "
+            "'소식이 있어요', '챙겨요', '해봐요'처럼 부담 없는 표현을 사용하세요. "
+            "항상 같은 문장 구조를 반복하지 말고 날씨 사실과 가벼운 행동 제안을 자연스럽게 연결하세요. "
             "targetScope가 TOMORROW이면 모든 문구가 내일 예보임을 명확히 드러내고, "
             "recentPosts는 비어 있으므로 게시판의 현재 상황을 추측하지 마세요. "
-            "headlineTitle 하나에 날씨 상황과 필요한 행동을 담은 완성된 한 문장을 작성하세요. "
+            "headlineTitle에는 날씨 상황과 그에 맞는 옷차림만 담으세요. "
+            "비나 눈이 예상될 때는 우산을 함께 안내해도 됩니다. "
+            "headlineTitle에 프리미엄, 알림, 빨래, 운동 기능을 언급하지 마세요. "
+            "headlineTitle 하나에 날씨와 옷차림을 자연스럽게 연결한 완성된 한 문장을 작성하세요. "
             "headlineTitle 끝에는 마침표, 느낌표, 물음표를 붙이지 마세요. "
             "headlineDescription은 반드시 빈 문자열로 반환하세요. "
             "같은 날씨 정보를 반복하지 말고 불필요한 수식어를 빼세요. "
-            "premiumMessage는 headlineTitle을 반복하지 말고 actionType에 맞춰 사용자의 행동을 확인하는 친근한 질문형 문구로 작성하세요. "
+            "premiumMessage는 headlineTitle의 날씨 내용을 반복하지 말고 actionType에 맞는 프리미엄 알림 기능을 안내하세요. "
             "LAUNDRY와 INDOOR_DRYING은 빨래, EXERCISE는 운동, UMBRELLA는 우산 알림, "
             "COLD는 겉옷, HYDRATION은 수분 섭취 내용을 사용하세요. "
             "headlineTitle은 30자 이하, "
-            "premiumMessage는 18자 이하로 작성하고 물음표로 끝내세요."
+            "premiumMessage는 18자 이하로 작성하고 끝에 문장부호를 붙이지 마세요."
         ),
         "input": (
             "다음 JSON을 바탕으로 커뮤니티 화면 문구를 생성하세요. "
@@ -141,9 +145,6 @@ def generate_community_copy(
         premium_message = str(
             generated.get("premiumMessage", "")
         ).strip().rstrip(".!?。")
-
-        if premium_message:
-            premium_message = f"{premium_message[:17]}?"
 
         if not title or not premium_message:
             raise ValueError("LINER가 빈 문구를 반환했습니다.")
