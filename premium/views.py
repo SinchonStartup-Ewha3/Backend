@@ -288,6 +288,14 @@ class PremiumBillingView(APIView):
             .order_by("-reviewed_at", "-pk")
             .first()
         )
+        latest_payapp_payment = (
+            PayAppPayment.objects.filter(
+                user=request.user,
+                completed_at__isnull=False,
+            )
+            .order_by("-completed_at", "-pk")
+            .first()
+        )
         paddle_can_refund = (
             PremiumPurchase.objects.filter(
                 user=request.user,
@@ -305,16 +313,56 @@ class PremiumBillingView(APIView):
         ).exists()
 
         subscription_data = None
+        use_payapp = bool(
+            latest_payapp_payment
+            and (
+                latest_purchase is None
+                or latest_payapp_payment.completed_at >= latest_purchase.completed_at
+            )
+            and (
+                latest_bank_transfer is None
+                or latest_payapp_payment.completed_at >= latest_bank_transfer.reviewed_at
+            )
+        )
         use_bank_transfer = bool(
             latest_bank_transfer
             and (
                 latest_purchase is None
                 or latest_bank_transfer.reviewed_at >= latest_purchase.completed_at
             )
+            and (
+                latest_payapp_payment is None
+                or latest_bank_transfer.reviewed_at
+                >= latest_payapp_payment.completed_at
+            )
         )
-        if use_bank_transfer:
+        if use_payapp:
+            payapp_is_active = bool(
+                is_premium
+                and latest_payapp_payment.entitlement_started_at
+                and latest_payapp_payment.entitlement_expires_at
+                and latest_payapp_payment.entitlement_started_at <= now
+                < latest_payapp_payment.entitlement_expires_at
+            )
+            subscription_data = {
+                "purchaseId": None,
+                "bankTransferRequestId": None,
+                "payAppPaymentId": latest_payapp_payment.pk,
+                "paymentMethod": "PAYAPP",
+                "productName": latest_payapp_payment.product_name,
+                "status": latest_payapp_payment.status,
+                "purchasedAt": latest_payapp_payment.completed_at,
+                "startedAt": latest_payapp_payment.entitlement_started_at,
+                "expiresAt": latest_payapp_payment.entitlement_expires_at,
+                "isActive": payapp_is_active,
+                "remainingSeconds": remaining_seconds if payapp_is_active else 0,
+                "canRequestRefund": False,
+            }
+        elif use_bank_transfer:
             bank_is_active = bool(
-                latest_bank_transfer.status == BankTransferRequest.Status.APPROVED
+                is_premium
+                and latest_bank_transfer.status
+                == BankTransferRequest.Status.APPROVED
                 and latest_bank_transfer.entitlement_started_at
                 and latest_bank_transfer.entitlement_expires_at
                 and latest_bank_transfer.entitlement_started_at <= now
