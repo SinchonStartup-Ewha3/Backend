@@ -203,6 +203,7 @@ class FortuneResultSerializer(serializers.ModelSerializer):
             "id",
             "target_date",
             "title",
+            "character",
             "luck_level",
             "luck_label",
             "summary",
