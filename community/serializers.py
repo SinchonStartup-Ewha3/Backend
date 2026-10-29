@@ -49,7 +49,7 @@ class PostSerializer(serializers.ModelSerializer):
         error_messages={
             "required": "태그를 선택해주세요.",
             "blank": "태그를 선택해주세요.",
-            "invalid_choice": "가디건, 패딩, 코트 중 하나를 선택해주세요.",
+            "invalid_choice": "가디건, 패딩, 코트, 기타 중 하나를 선택해주세요.",
         },
     )
     tagLabel = serializers.CharField(source="get_tag_display", read_only=True)
