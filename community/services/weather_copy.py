@@ -17,7 +17,7 @@ from .liner_client import generate_community_copy
 
 
 FIXED_SUB_MESSAGE = (
-    "이미 많은 사람들이 알림 기능을 사용하고 있어요"
+    "알림으로 미리 준비해요"
 )
 
 PREMIUM_TARGET_URL = "/premium"
@@ -184,7 +184,7 @@ def _fallback_copy(
 
     return {
         "headlineTitle": headline_title,
-        "headlineDescription": headline_description,
+        "headlineDescription": "",
         "premiumMessage": premium_message,
         "actionType": action_type,
     }
@@ -310,9 +310,9 @@ def build_community_weather_copy(*, region, grid, now=None) -> tuple[object, dic
 
     generated = generate_community_copy(
         weather_context={
-            "regionName": region.region_name,
             "targetScope": time_scope,
             "targetDate": target_date.isoformat(),
+            "actionType": fallback["actionType"],
             "current": target_weather if not is_tomorrow else None,
             "hourly": target_hourly,
             "outfit": build_life_info(
