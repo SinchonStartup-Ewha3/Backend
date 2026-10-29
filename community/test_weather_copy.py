@@ -165,7 +165,7 @@ class CommunityWeatherCopyTests(APITestCase):
         self.assertEqual(result["headline"]["description"], "")
         self.assertEqual(
             result["premiumCard"]["message"],
-            "빨래하기 좋은 때 알려드려요",
+            "오늘 빨래 계획 있으신가요?",
         )
         self.assertEqual(
             result["premiumCard"]["subMessage"],
