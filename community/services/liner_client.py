@@ -62,16 +62,18 @@ def generate_community_copy(
             "recentPosts는 비어 있으므로 게시판의 현재 상황을 추측하지 마세요. "
             "headlineTitle에는 날씨 상황과 그에 맞는 옷차림만 담으세요. "
             "비나 눈이 예상될 때는 우산을 함께 안내해도 됩니다. "
+            "옷과 우산을 같은 동사로 묶지 말고, 옷은 입거나 차림을 갖추는 대상으로, 우산은 챙기는 대상으로 자연스럽게 구분하세요. "
+            "예를 들어 '트렌치코트와 우산을 챙겨요' 대신 '트렌치코트를 입고 우산도 챙겨요'라고 작성하세요. "
             "headlineTitle에 프리미엄, 알림, 빨래, 운동 기능을 언급하지 마세요. "
             "headlineTitle 하나에 날씨와 옷차림을 자연스럽게 연결한 완성된 한 문장을 작성하세요. "
             "headlineTitle 끝에는 마침표, 느낌표, 물음표를 붙이지 마세요. "
             "headlineDescription은 반드시 빈 문자열로 반환하세요. "
             "같은 날씨 정보를 반복하지 말고 불필요한 수식어를 빼세요. "
-            "premiumMessage는 headlineTitle의 날씨 내용을 반복하지 말고 actionType에 맞는 프리미엄 알림 기능을 안내하세요. "
+            "premiumMessage는 headlineTitle의 날씨 내용을 반복하지 말고 actionType에 맞는 행동을 확인하는 친근한 질문으로 작성하세요. "
             "LAUNDRY와 INDOOR_DRYING은 빨래, EXERCISE는 운동, UMBRELLA는 우산 알림, "
             "COLD는 겉옷, HYDRATION은 수분 섭취 내용을 사용하세요. "
             "headlineTitle은 30자 이하, "
-            "premiumMessage는 18자 이하로 작성하고 끝에 문장부호를 붙이지 마세요."
+            "premiumMessage는 물음표를 포함해 18자 이하로 작성하세요."
         ),
         "input": (
             "다음 JSON을 바탕으로 커뮤니티 화면 문구를 생성하세요. "
@@ -146,7 +148,15 @@ def generate_community_copy(
             generated.get("premiumMessage", "")
         ).strip().rstrip(".!?。")
 
-        if not title or not premium_message:
+        if not premium_message:
+            raise ValueError("LINER가 빈 문구를 반환했습니다.")
+
+        if len(premium_message) > 17:
+            raise ValueError("프리미엄 문구가 너무 깁니다.")
+
+        premium_message = f"{premium_message}?"
+
+        if not title:
             raise ValueError("LINER가 빈 문구를 반환했습니다.")
 
         if len(title) > 30:

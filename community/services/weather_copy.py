@@ -111,18 +111,18 @@ def _fallback_copy(
     if life_info.umbrella_needed:
         if life_info.character.value == "SNOWY":
             headline_title = (
-                f"내일은 눈과 추위에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+                f"내일은 눈 소식이 있어요 {life_info.outfit_label} 차림에 우산도 챙겨요"
                 if is_tomorrow
-                else f"눈과 추위에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+                else f"눈 소식이 있어요 {life_info.outfit_label} 차림에 우산도 챙겨요"
             )
         else:
             headline_title = (
-                f"내일은 비 소식에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+                f"내일은 비 소식이 있어요 {life_info.outfit_label} 차림에 우산도 챙겨요"
                 if is_tomorrow
-                else f"비 소식에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+                else f"비 소식이 있어요 {life_info.outfit_label} 차림에 우산도 챙겨요"
             )
         action_type = "UMBRELLA"
-        premium_message = "비 오기 전 알려드려요"
+        premium_message = "우산 챙기셨나요?"
 
     elif feels_like <= 5:
         headline_title = (
@@ -131,7 +131,7 @@ def _fallback_copy(
             else f"뚝 떨어진 기온에 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "COLD"
-        premium_message = "기온 변화를 미리 알려드려요"
+        premium_message = "겉옷 챙기셨나요?"
 
     elif feels_like >= 28:
         headline_title = (
@@ -140,7 +140,7 @@ def _fallback_copy(
             else f"기온이 크게 올라 {life_info.outfit_label}처럼 가볍게 입어요"
         )
         action_type = "HYDRATION"
-        premium_message = "더운 날 수분 알림을 받아요"
+        premium_message = "물 챙기셨나요?"
 
     elif humidity is not None and humidity >= 75:
         headline_title = (
@@ -149,7 +149,7 @@ def _fallback_copy(
             else f"습하고 후텁지근해 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "INDOOR_DRYING"
-        premium_message = "실내 건조 때를 알려드려요"
+        premium_message = "실내 건조 준비하셨나요?"
 
     elif (
         humidity is not None
@@ -162,7 +162,7 @@ def _fallback_copy(
             else f"포근한 날씨에 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "LAUNDRY"
-        premium_message = "빨래하기 좋은 때 알려드려요"
+        premium_message = "오늘 빨래 계획 있으신가요?"
 
     elif 10 <= feels_like <= 25:
         headline_title = (
@@ -171,7 +171,7 @@ def _fallback_copy(
             else f"포근한 날씨에 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "EXERCISE"
-        premium_message = "운동하기 좋은 때 알려드려요"
+        premium_message = "오늘 운동 계획 있으신가요?"
 
     else:
         headline_title = (
@@ -180,7 +180,7 @@ def _fallback_copy(
             else f"오늘 날씨에는 {life_info.outfit_label} 차림이 잘 어울려요"
         )
         action_type = "WEATHER"
-        premium_message = "날씨 변화를 미리 알려드려요"
+        premium_message = "맞춤 알림 받아보실래요?"
 
     return {
         "headlineTitle": headline_title,
