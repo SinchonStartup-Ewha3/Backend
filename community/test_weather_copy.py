@@ -1,5 +1,7 @@
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
+from zoneinfo import ZoneInfo
 
 from django.contrib.auth import get_user_model
 from django.core.cache import cache
@@ -144,6 +146,13 @@ class CommunityWeatherCopyTests(APITestCase):
             region, result = build_community_weather_copy(
                 region=self.region,
                 grid=(60, 127),
+                now=datetime(
+                    2026,
+                    10,
+                    29,
+                    12,
+                    tzinfo=ZoneInfo("Asia/Seoul"),
+                ),
             )
 
         self.assertEqual(region, self.region)
@@ -165,8 +174,81 @@ class CommunityWeatherCopyTests(APITestCase):
             result["premiumCard"]["message"],
         )
         mock_current_weather.assert_called_once_with(60, 127)
-        mock_hourly_weather.assert_called_once_with(60, 127, hours=24)
+        mock_hourly_weather.assert_called_once_with(60, 127, hours=36)
         mock_generate_copy.assert_called_once()
+        self.assertEqual(result["timeScope"], "TODAY")
+        self.assertEqual(result["targetDate"], "2026-10-29")
+
+    def test_after_8pm_uses_tomorrow_forecast_without_recent_posts(self):
+        current_weather = {
+            "temperature": 18,
+            "feelsLike": 18,
+            "humidity": 50,
+            "condition": "CLEAR",
+        }
+        hourly_weather = [
+            {
+                "time": "2026-10-29T21:00:00+09:00",
+                "hour": 21,
+                "temperature": 17,
+                "feelsLike": 17,
+                "humidity": 55,
+                "windSpeed": 1,
+                "condition": "CLEAR",
+                "conditionLabel": "맑음",
+                "precipitationProbability": 0,
+                "isNight": True,
+            },
+            {
+                "time": "2026-10-30T09:00:00+09:00",
+                "hour": 9,
+                "temperature": 11,
+                "feelsLike": 10,
+                "humidity": 70,
+                "windSpeed": 2,
+                "condition": "RAIN",
+                "conditionLabel": "비",
+                "precipitationProbability": 80,
+                "isNight": False,
+            },
+        ]
+
+        with (
+            patch(
+                "community.services.weather_copy.get_current_weather",
+                return_value=current_weather,
+            ),
+            patch(
+                "community.services.weather_copy.get_hourly_weather",
+                return_value=hourly_weather,
+            ),
+            patch(
+                "community.services.weather_copy._recent_consistent_posts",
+            ) as mock_recent_posts,
+            patch(
+                "community.services.weather_copy.generate_community_copy",
+                return_value=None,
+            ) as mock_generate_copy,
+        ):
+            _, result = build_community_weather_copy(
+                region=self.region,
+                grid=(60, 127),
+                now=datetime(
+                    2026,
+                    10,
+                    29,
+                    20,
+                    tzinfo=ZoneInfo("Asia/Seoul"),
+                ),
+            )
+
+        self.assertEqual(result["timeScope"], "TOMORROW")
+        self.assertEqual(result["targetDate"], "2026-10-30")
+        self.assertIn("내일", result["headline"]["title"])
+        mock_recent_posts.assert_not_called()
+        weather_context = mock_generate_copy.call_args.kwargs["weather_context"]
+        self.assertEqual(weather_context["targetScope"], "TOMORROW")
+        self.assertEqual(len(weather_context["hourly"]), 1)
 
     @patch("community.views.build_community_weather_copy")
     def test_guest_can_use_region_code(self, mock_build_copy):

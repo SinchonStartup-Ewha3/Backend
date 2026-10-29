@@ -11,14 +11,16 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .models import (
+    BankTransferRequest,
     NotificationPreference,
     PremiumEntitlement,
     PremiumProfile,
     PremiumPurchase,
     PremiumRefundRequest,
 )
-from .permissions import HasActivePremium
+from .permissions import CanAccessPremiumSurvey, HasActivePremium
 from .serializers import (
+    BankTransferRequestSerializer,
     NotificationPreferenceSerializer,
     PremiumProfileSerializer,
     PremiumRefundRequestSerializer,
@@ -39,7 +41,7 @@ logger = logging.getLogger(__name__)
 
 
 class PremiumProfileView(APIView):
-    permission_classes = [IsAuthenticated, HasActivePremium]
+    permission_classes = [IsAuthenticated, CanAccessPremiumSurvey]
 
     def get(self, request):
         profile = PremiumProfile.objects.filter(
@@ -116,13 +118,118 @@ class PremiumStatusView(APIView):
                 0,
                 math.ceil((entitlement.expires_at - now).total_seconds()),
             )
+
+        latest_bank_transfer = (
+            BankTransferRequest.objects.filter(user=request.user)
+            .order_by("-created_at")
+            .first()
+        )
+        bank_transfer_status = (
+            latest_bank_transfer.status if latest_bank_transfer else None
+        )
+        active_bank_transfer = BankTransferRequest.objects.filter(
+            user=request.user,
+            status=BankTransferRequest.Status.APPROVED,
+            entitlement_started_at__lte=now,
+            entitlement_expires_at__gt=now,
+        ).exists()
+        active_paddle_purchase = PremiumPurchase.objects.filter(
+            user=request.user,
+            status__in=[
+                PremiumPurchase.Status.COMPLETED,
+                PremiumPurchase.Status.PARTIALLY_REFUNDED,
+            ],
+            revoked_at__isnull=True,
+            entitlement_started_at__lte=now,
+            entitlement_expires_at__gt=now,
+        ).exists()
+        if active_bank_transfer:
+            payment_method = "BANK_TRANSFER"
+        elif active_paddle_purchase:
+            payment_method = "PADDLE"
+        elif is_premium:
+            payment_method = "MANUAL"
+        else:
+            payment_method = None
+
         return Response(
             {
                 "isPremium": is_premium,
+                "canCompleteSurvey": (
+                    is_premium
+                    or bank_transfer_status == BankTransferRequest.Status.PENDING
+                ),
+                "bankTransferStatus": bank_transfer_status,
+                "paymentMethod": payment_method,
                 "premiumStartedAt": entitlement.started_at if entitlement else None,
                 "premiumExpiresAt": entitlement.expires_at if entitlement else None,
                 "remainingSeconds": remaining_seconds,
             }
+        )
+
+
+class BankTransferRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        transfer_request = (
+            BankTransferRequest.objects.filter(user=request.user)
+            .order_by("-created_at")
+            .first()
+        )
+        if transfer_request is None:
+            return Response(
+                {
+                    "detail": "계좌이체 요청이 없습니다.",
+                    "code": "BANK_TRANSFER_REQUEST_NOT_FOUND",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(BankTransferRequestSerializer(transfer_request).data)
+
+    def post(self, request):
+        now = timezone.now()
+        entitlement = PremiumEntitlement.objects.filter(user=request.user).first()
+        if entitlement and entitlement.is_active(now):
+            return Response(
+                {
+                    "detail": "이미 프리미엄을 이용 중입니다.",
+                    "code": "PREMIUM_ALREADY_ACTIVE",
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        existing_request = BankTransferRequest.objects.filter(
+            user=request.user,
+            status=BankTransferRequest.Status.PENDING,
+        ).first()
+        if existing_request is not None:
+            return Response(
+                BankTransferRequestSerializer(existing_request).data,
+                status=status.HTTP_200_OK,
+            )
+
+        serializer = BankTransferRequestSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        try:
+            transfer_request = serializer.save(
+                user=request.user,
+                amount=settings.PADDLE_PREMIUM_AMOUNT,
+                currency_code=settings.PADDLE_PREMIUM_CURRENCY,
+            )
+        except IntegrityError:
+            transfer_request = BankTransferRequest.objects.get(
+                user=request.user,
+                status=BankTransferRequest.Status.PENDING,
+            )
+            return Response(
+                BankTransferRequestSerializer(transfer_request).data,
+                status=status.HTTP_200_OK,
+            )
+
+        return Response(
+            BankTransferRequestSerializer(transfer_request).data,
+            status=status.HTTP_201_CREATED,
         )
 
 
@@ -150,7 +257,15 @@ class PremiumBillingView(APIView):
             .order_by("-completed_at", "-pk")
             .first()
         )
-        can_request_refund = (
+        latest_bank_transfer = (
+            BankTransferRequest.objects.filter(
+                user=request.user,
+                reviewed_at__isnull=False,
+            )
+            .order_by("-reviewed_at", "-pk")
+            .first()
+        )
+        paddle_can_refund = (
             PremiumPurchase.objects.filter(
                 user=request.user,
                 status=PremiumPurchase.Status.COMPLETED,
@@ -159,11 +274,47 @@ class PremiumBillingView(APIView):
                 refund_request__isnull=True,
             ).exists()
         )
+        bank_can_refund = BankTransferRequest.objects.filter(
+            user=request.user,
+            status=BankTransferRequest.Status.APPROVED,
+            entitlement_expires_at__gt=now,
+            refund_request__isnull=True,
+        ).exists()
 
         subscription_data = None
-        if latest_purchase is not None:
+        use_bank_transfer = bool(
+            latest_bank_transfer
+            and (
+                latest_purchase is None
+                or latest_bank_transfer.reviewed_at >= latest_purchase.completed_at
+            )
+        )
+        if use_bank_transfer:
+            bank_is_active = bool(
+                latest_bank_transfer.status == BankTransferRequest.Status.APPROVED
+                and latest_bank_transfer.entitlement_started_at
+                and latest_bank_transfer.entitlement_expires_at
+                and latest_bank_transfer.entitlement_started_at <= now
+                < latest_bank_transfer.entitlement_expires_at
+            )
+            subscription_data = {
+                "purchaseId": None,
+                "bankTransferRequestId": latest_bank_transfer.pk,
+                "paymentMethod": "BANK_TRANSFER",
+                "productName": "맞춤형 행동 알림",
+                "status": latest_bank_transfer.status,
+                "purchasedAt": latest_bank_transfer.reviewed_at,
+                "startedAt": latest_bank_transfer.entitlement_started_at,
+                "expiresAt": latest_bank_transfer.entitlement_expires_at,
+                "isActive": bank_is_active,
+                "remainingSeconds": remaining_seconds if bank_is_active else 0,
+                "canRequestRefund": bank_can_refund,
+            }
+        elif latest_purchase is not None:
             subscription_data = {
                 "purchaseId": latest_purchase.pk,
+                "bankTransferRequestId": None,
+                "paymentMethod": "PADDLE",
                 "productName": "맞춤형 행동 알림",
                 "status": latest_purchase.status,
                 "purchasedAt": latest_purchase.completed_at,
@@ -171,7 +322,7 @@ class PremiumBillingView(APIView):
                 "expiresAt": entitlement.expires_at if entitlement else None,
                 "isActive": is_premium,
                 "remainingSeconds": remaining_seconds,
-                "canRequestRefund": can_request_refund,
+                "canRequestRefund": paddle_can_refund,
             }
 
         return Response({"subscription": subscription_data})
@@ -226,7 +377,7 @@ class PremiumRefundRequestView(APIView):
     def get(self, request):
         refund_request = (
             PremiumRefundRequest.objects.filter(user=request.user)
-            .select_related("purchase")
+            .select_related("purchase", "bank_transfer_request")
             .first()
         )
         if refund_request is None:
@@ -241,6 +392,15 @@ class PremiumRefundRequestView(APIView):
 
     def post(self, request):
         now = timezone.now()
+        bank_transfer_request = (
+            BankTransferRequest.objects.filter(
+                user=request.user,
+                status=BankTransferRequest.Status.APPROVED,
+                entitlement_expires_at__gt=now,
+            )
+            .order_by("-reviewed_at", "-pk")
+            .first()
+        )
         purchase = (
             PremiumPurchase.objects.filter(
                 user=request.user,
@@ -251,12 +411,15 @@ class PremiumRefundRequestView(APIView):
             .order_by("-completed_at", "-pk")
             .first()
         )
-        if purchase is None:
+        if bank_transfer_request is None and purchase is None:
             return self.no_refundable_purchase_response()
 
-        existing_request = PremiumRefundRequest.objects.filter(
-            purchase=purchase,
-        ).first()
+        source_filter = (
+            {"bank_transfer_request": bank_transfer_request}
+            if bank_transfer_request is not None
+            else {"purchase": purchase}
+        )
+        existing_request = PremiumRefundRequest.objects.filter(**source_filter).first()
         if existing_request is not None:
             return self.duplicate_request_response(existing_request)
 
@@ -264,30 +427,53 @@ class PremiumRefundRequestView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             with transaction.atomic():
-                purchase = PremiumPurchase.objects.select_for_update().get(
-                    pk=purchase.pk,
-                    user=request.user,
-                    status=PremiumPurchase.Status.COMPLETED,
-                    revoked_at__isnull=True,
-                    entitlement_expires_at__gt=timezone.now(),
-                )
-                prorated_refund = calculate_prorated_refund(
-                    purchase,
-                    requested_at=now,
-                )
-                refund_request = serializer.save(
-                    user=request.user,
-                    purchase=purchase,
-                    requested_amount=prorated_refund.amount,
-                    currency_code=purchase.currency_code,
-                    remaining_seconds=prorated_refund.remaining_seconds,
-                )
-        except (PremiumPurchase.DoesNotExist, RefundCalculationError):
+                if bank_transfer_request is not None:
+                    bank_transfer_request = (
+                        BankTransferRequest.objects.select_for_update().get(
+                            pk=bank_transfer_request.pk,
+                            user=request.user,
+                            status=BankTransferRequest.Status.APPROVED,
+                            entitlement_expires_at__gt=timezone.now(),
+                        )
+                    )
+                    prorated_refund = calculate_prorated_refund(
+                        bank_transfer_request,
+                        requested_at=now,
+                    )
+                    refund_request = serializer.save(
+                        user=request.user,
+                        bank_transfer_request=bank_transfer_request,
+                        requested_amount=prorated_refund.amount,
+                        currency_code=bank_transfer_request.currency_code,
+                        remaining_seconds=prorated_refund.remaining_seconds,
+                    )
+                else:
+                    purchase = PremiumPurchase.objects.select_for_update().get(
+                        pk=purchase.pk,
+                        user=request.user,
+                        status=PremiumPurchase.Status.COMPLETED,
+                        revoked_at__isnull=True,
+                        entitlement_expires_at__gt=timezone.now(),
+                    )
+                    prorated_refund = calculate_prorated_refund(
+                        purchase,
+                        requested_at=now,
+                    )
+                    refund_request = serializer.save(
+                        user=request.user,
+                        purchase=purchase,
+                        requested_amount=prorated_refund.amount,
+                        currency_code=purchase.currency_code,
+                        remaining_seconds=prorated_refund.remaining_seconds,
+                    )
+        except (
+            PremiumPurchase.DoesNotExist,
+            BankTransferRequest.DoesNotExist,
+            RefundCalculationError,
+        ):
             return self.no_refundable_purchase_response()
         except IntegrityError:
-            existing_request = PremiumRefundRequest.objects.get(
-                purchase=purchase,
-            )
+            existing_request = PremiumRefundRequest.objects.get(**source_filter)
             return self.duplicate_request_response(existing_request)
 
         return Response(

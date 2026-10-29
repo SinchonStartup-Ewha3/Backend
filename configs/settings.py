@@ -119,6 +119,12 @@ COMMUNITY_COPY_CONSISTENCY_RATIO = env.float(
     default=0.6,
 )
 
+# 이 시각부터 커뮤니티 날씨 문구를 다음 날 예보로 전환합니다.
+COMMUNITY_TOMORROW_COPY_START_HOUR = env.int(
+    "COMMUNITY_TOMORROW_COPY_START_HOUR",
+    default=20,
+)
+
 
 
 # SECURITY WARNING: don't run with debug turned on in production!
