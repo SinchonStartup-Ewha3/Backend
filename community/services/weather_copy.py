@@ -108,79 +108,82 @@ def _fallback_copy(
     condition = current_weather.get("condition")
     is_tomorrow = time_scope == "TOMORROW"
 
-    if life_info.character.value == "SNOWY":
-        headline_title = "내일은 눈이 내려요" if is_tomorrow else "눈이 내리는 오늘"
-    elif life_info.umbrella_needed:
-        headline_title = "내일은 비 소식이 있어요" if is_tomorrow else "비 소식이 있는 오늘"
-    elif feels_like <= 5:
-        headline_title = "내일은 기온이 뚝 떨어져요" if is_tomorrow else "기온이 뚝 떨어진 오늘"
-    elif feels_like >= 28:
-        headline_title = "내일은 기온이 크게 올라요" if is_tomorrow else "기온이 크게 오른 오늘"
-    else:
-        headline_title = "가볍게 외출하기 좋은 내일" if is_tomorrow else "가볍게 외출하기 좋은 오늘"
-
     if life_info.umbrella_needed:
-        headline_description = (
-            f"{life_info.outfit_label} 차림과 우산을 추천해요"
-        )
+        if life_info.character.value == "SNOWY":
+            headline_title = (
+                f"내일은 눈과 추위에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+                if is_tomorrow
+                else f"눈과 추위에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+            )
+        else:
+            headline_title = (
+                f"내일은 비 소식에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+                if is_tomorrow
+                else f"비 소식에 {life_info.outfit_label} 차림과 우산을 챙겨요"
+            )
         action_type = "UMBRELLA"
-        premium_message = "우산 챙기셨나요?"
+        premium_message = "비 오기 전 알려드려요"
 
     elif feels_like <= 5:
-        headline_description = (
-            f"{life_info.outfit_label} 차림으로 따뜻하게 입어주세요"
+        headline_title = (
+            f"내일은 뚝 떨어진 기온에 {life_info.outfit_label} 차림을 추천해요"
+            if is_tomorrow
+            else f"뚝 떨어진 기온에 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "COLD"
-        premium_message = "겉옷 챙기셨나요?"
+        premium_message = "기온 변화를 미리 알려드려요"
 
     elif feels_like >= 28:
-        headline_description = (
-            f"{life_info.outfit_label}처럼 가볍게 입어주세요"
+        headline_title = (
+            f"내일은 기온이 크게 올라 {life_info.outfit_label}처럼 가볍게 입어요"
+            if is_tomorrow
+            else f"기온이 크게 올라 {life_info.outfit_label}처럼 가볍게 입어요"
         )
         action_type = "HYDRATION"
-        premium_message = "물 챙기셨나요?"
+        premium_message = "더운 날 수분 알림을 받아요"
 
     elif humidity is not None and humidity >= 75:
-        headline_description = (
-            f"{life_info.outfit_label} 차림을 추천해요"
+        headline_title = (
+            f"내일은 습하고 후텁지근해 {life_info.outfit_label} 차림을 추천해요"
+            if is_tomorrow
+            else f"습하고 후텁지근해 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "INDOOR_DRYING"
-        premium_message = "실내 건조 준비하셨나요?"
+        premium_message = "실내 건조 때를 알려드려요"
 
     elif (
         humidity is not None
         and humidity <= 60
         and condition in {"CLEAR", "PARTLY_CLOUDY"}
     ):
-        headline_description = (
-            f"{life_info.outfit_label} 차림을 추천해요"
+        headline_title = (
+            f"내일은 포근한 날씨에 {life_info.outfit_label} 차림을 추천해요"
+            if is_tomorrow
+            else f"포근한 날씨에 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "LAUNDRY"
-        premium_message = "오늘 빨래 계획 있으신가요?"
+        premium_message = "빨래하기 좋은 때 알려드려요"
 
     elif 10 <= feels_like <= 25:
-        headline_description = (
-            f"{life_info.outfit_label} 차림을 추천해요"
+        headline_title = (
+            f"내일은 포근한 날씨에 {life_info.outfit_label} 차림을 추천해요"
+            if is_tomorrow
+            else f"포근한 날씨에 {life_info.outfit_label} 차림을 추천해요"
         )
         action_type = "EXERCISE"
-        premium_message = "오늘 운동 계획 있으신가요?"
+        premium_message = "운동하기 좋은 때 알려드려요"
 
     else:
-        headline_description = (
-            "내일 날씨에 맞춰 미리 준비해보세요"
+        headline_title = (
+            f"내일 날씨에는 {life_info.outfit_label} 차림이 잘 어울려요"
             if is_tomorrow
-            else life_info.message
+            else f"오늘 날씨에는 {life_info.outfit_label} 차림이 잘 어울려요"
         )
         action_type = "WEATHER"
-        premium_message = "맞춤 알림 받아보실래요?"
-
-    combined_headline = (
-        f"{headline_title}, {headline_description}"
-        .rstrip(".!?。")
-    )
+        premium_message = "날씨 변화를 미리 알려드려요"
 
     return {
-        "headlineTitle": combined_headline,
+        "headlineTitle": headline_title,
         "headlineDescription": "",
         "premiumMessage": premium_message,
         "actionType": action_type,

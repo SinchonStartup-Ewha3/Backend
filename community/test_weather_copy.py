@@ -65,7 +65,7 @@ class FallbackCopyTests(SimpleTestCase):
 
         self.assertEqual(
             result["headlineTitle"],
-            "가볍게 외출하기 좋은 오늘, 가디건 차림을 추천해요",
+            "포근한 날씨에 가디건 차림을 추천해요",
         )
         self.assertEqual(result["headlineDescription"], "")
 
@@ -89,7 +89,7 @@ class FallbackCopyTests(SimpleTestCase):
 
         self.assertEqual(
             result["headlineTitle"],
-            "기온이 뚝 떨어진 오늘, 가디건 차림으로 따뜻하게 입어주세요",
+            "뚝 떨어진 기온에 가디건 차림을 추천해요",
         )
         self.assertEqual(result["actionType"], "COLD")
 
@@ -160,12 +160,16 @@ class CommunityWeatherCopyTests(APITestCase):
         self.assertEqual(result["headline"]["source"], "FALLBACK")
         self.assertEqual(
             result["headline"]["title"],
-            "가볍게 외출하기 좋은 오늘, 가디건 차림을 추천해요",
+            "포근한 날씨에 가디건 차림을 추천해요",
         )
         self.assertEqual(result["headline"]["description"], "")
         self.assertEqual(
             result["premiumCard"]["message"],
-            "오늘 빨래 계획 있으신가요?",
+            "빨래하기 좋은 때 알려드려요",
+        )
+        self.assertEqual(
+            result["premiumCard"]["subMessage"],
+            "이미 많은 사람들이 알림 기능을 사용하고 있어요",
         )
         self.assertNotIn(
             self.user.nickname,
