@@ -258,26 +258,31 @@ def complete_payapp_refund(refund_request, *, completed_at=None):
         )
         entitlement.save(update_fields=["expires_at", "modified_at"])
 
-    payment.status = (
-        PayAppPayment.Status.APPROVAL_CANCELED
-        if locked_request.requested_amount >= payment.amount
-        else PayAppPayment.Status.PARTIALLY_CANCELED
-    )
-    payment.provider_canceled_at = completed_at
+    provider_cancel_statuses = {
+        PayAppPayment.Status.APPROVAL_CANCELED,
+        PayAppPayment.Status.PARTIALLY_CANCELED,
+    }
+    payment_update_fields = [
+        "refund_confirmed_at",
+        "admin_note",
+        "modified_at",
+    ]
+    if payment.status not in provider_cancel_statuses:
+        payment.status = (
+            PayAppPayment.Status.APPROVAL_CANCELED
+            if locked_request.requested_amount >= payment.amount
+            else PayAppPayment.Status.PARTIALLY_CANCELED
+        )
+        payment_update_fields.append("status")
+    if payment.provider_canceled_at is None:
+        payment.provider_canceled_at = completed_at
+        payment_update_fields.append("provider_canceled_at")
     payment.refund_confirmed_at = completed_at
     note = "PayApp 관리자 환불 확인 후 환불 요청 완료 처리"
     payment.admin_note = (
         f"{payment.admin_note} | {note}" if payment.admin_note else note
     )[:255]
-    payment.save(
-        update_fields=[
-            "status",
-            "provider_canceled_at",
-            "refund_confirmed_at",
-            "admin_note",
-            "modified_at",
-        ]
-    )
+    payment.save(update_fields=payment_update_fields)
 
     locked_request.status = PremiumRefundRequest.Status.COMPLETED
     locked_request.completed_at = completed_at

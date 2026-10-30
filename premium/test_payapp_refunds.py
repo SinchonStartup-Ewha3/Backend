@@ -113,3 +113,39 @@ class PayAppRefundRequestTests(APITestCase):
         self.assertEqual(self.payment.refund_confirmed_at, completed_at)
         self.assertFalse(self.entitlement.is_active(completed_at))
 
+    def test_admin_completion_preserves_provider_approval_cancel_status(self):
+        self.client.post(self.url, self.payload, format="json")
+        refund_request = PremiumRefundRequest.objects.get(
+            payapp_payment=self.payment,
+        )
+        provider_canceled_at = timezone.now()
+        self.payment.status = PayAppPayment.Status.APPROVAL_CANCELED
+        self.payment.provider_state = "9"
+        self.payment.provider_canceled_at = provider_canceled_at
+        self.payment.save(
+            update_fields=[
+                "status",
+                "provider_state",
+                "provider_canceled_at",
+                "modified_at",
+            ]
+        )
+        completed_at = provider_canceled_at + timedelta(hours=1)
+
+        complete_payapp_refund(
+            refund_request,
+            completed_at=completed_at,
+        )
+
+        self.payment.refresh_from_db()
+        self.assertEqual(
+            self.payment.status,
+            PayAppPayment.Status.APPROVAL_CANCELED,
+        )
+        self.assertEqual(self.payment.provider_state, "9")
+        self.assertEqual(
+            self.payment.provider_canceled_at,
+            provider_canceled_at,
+        )
+        self.assertEqual(self.payment.refund_confirmed_at, completed_at)
+
