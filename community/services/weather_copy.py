@@ -109,7 +109,7 @@ def _fallback_copy(
     is_tomorrow = time_scope == "TOMORROW"
 
     if life_info.umbrella_needed:
-        if life_info.character.value == "SNOWY":
+        if condition == "SNOW":
             headline_title = (
                 f"내일은 눈이 와 더 추워요 {life_info.outfit_label} 차림에 우산도 챙겨요"
                 if is_tomorrow
