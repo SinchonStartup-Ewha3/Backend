@@ -57,7 +57,8 @@ def _next_start_date(user, today):
             409,
         )
     latest = (
-        FortunePurchase.objects.select_for_update()
+        # 환불 요청(nullable) 조인이 있어 PostgreSQL에서는 이용권 행만 잠근다.
+        FortunePurchase.objects.select_for_update(of=("self",))
         .filter(
             user=user,
             active_until__gte=today,
