@@ -78,7 +78,12 @@ LINER_TIMEOUT_SECONDS = env.int(
     "LINER_TIMEOUT_SECONDS",
     default=10,
 )
-
+# OpenAI 오늘의 운세 상세 풀이 생성 설정 (실패하면 규칙 기반 풀이를 사용)
+OPENAI_API_KEY = env("OPENAI_API_KEY", default="")
+OPENAI_API_URL = env("OPENAI_API_URL", default="https://api.openai.com/v1/responses")
+OPENAI_FORTUNE_MODEL = env("OPENAI_FORTUNE_MODEL", default="gpt-4o-mini")
+OPENAI_FORTUNE_ENABLED = env.bool("OPENAI_FORTUNE_ENABLED", default=False)
+OPENAI_TIMEOUT_SECONDS = env.int("OPENAI_TIMEOUT_SECONDS", default=8)
 # Paddle Billing (sandbox/live credentials are always supplied through env files)
 PADDLE_API_KEY = env("PADDLE_API_KEY", default="")
 PADDLE_ENVIRONMENT = env("PADDLE_ENVIRONMENT", default="sandbox")

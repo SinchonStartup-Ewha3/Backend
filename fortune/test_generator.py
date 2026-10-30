@@ -11,6 +11,7 @@ from core.models import Region
 from fortune.models import FortuneProfile, FortuneResult
 from fortune.services.characters import CHARACTERS, CHARACTERS_BY_LEVEL
 from fortune.services.generator import build_fortune_result, get_or_create_fortune_result
+from fortune.services.lucky_actions import LUCKY_ACTIONS
 from fortune.services.saju import Element, LuckLevel, day_stem_element, luck_level
 
 User = get_user_model()
@@ -67,11 +68,16 @@ class GeneratorTests(TestCase):
         self.assertCountEqual(grouped, CHARACTERS)  # 24종이 빠짐·중복 없이 등급에 한 번씩
         self.assertEqual(set(CHARACTERS_BY_LEVEL), set(LuckLevel))
 
-    def test_rain_adds_weather_sentence(self):
+    def test_rain_adds_lucky_action(self):
         result = build_fortune_result(
             user=self.user, profile=self.profile, target_date=date(2026, 10, 13), weather="RAIN",
         )
-        self.assertIn("비가 오는 날", result["detail_text"])
+        self.assertTrue(any(action in result["detail_text"] for action in LUCKY_ACTIONS["RAIN"]))
+        self.assertEqual(result["weather_condition"], "RAIN")
+
+    def test_without_weather_detail_is_character_only(self):
+        result = build_fortune_result(user=self.user, profile=self.profile, target_date=date(2026, 10, 13))
+        self.assertEqual(result["detail_text"], CHARACTERS[result["character"]].detail)
 
     def test_without_location_weather_is_none(self):
         result = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
