@@ -1,6 +1,8 @@
-# WEE Premium PayApp 연동
+# WEE Premium · 운세 PayApp 연동
 
 WEE Premium은 PayApp 일회성 결제로 2,500원을 결제한 사용자에게 21일 권한을 지급합니다. 결제 완료 페이지는 안내 용도이며, 권한은 PayApp의 서버 통보를 검증한 뒤에만 지급합니다.
+
+운세는 `FortuneProduct`에 저장된 1·7·14·21일 상품 가격으로 결제를 요청하고, 검증된 PayApp 서버 통보가 도착한 뒤에만 해당 기간의 상세 운세를 엽니다.
 
 ## API
 
@@ -12,6 +14,13 @@ WEE Premium은 PayApp 일회성 결제로 2,500원을 결제한 사용자에게 
   - 정상 처리 시 HTTP 200과 본문 `SUCCESS`를 반환합니다.
 - `GET /api/premium/status/` (JWT 필요)
   - 현재 Premium 활성 여부와 만료 시각을 반환합니다.
+- `POST /api/fortune/payapp/checkout/` (JWT 필요)
+  - 요청: `{"product_id": 2, "recvphone": "01012345678"}`
+  - 서버가 상품명과 가격을 조회해 주문을 만들고 `purchaseId`, `paymentUrl`을 반환합니다.
+- `POST /api/fortune/webhooks/payapp/` (PayApp 서버 전용)
+  - 운세 주문 토큰, 상품명, 가격, 결제요청번호를 검증하고 이용권을 활성화합니다.
+- `GET /api/fortune/purchases/<purchaseId>/` (JWT 필요)
+  - 결제 결과 화면에서 본인 주문의 `payment_status`를 조회합니다.
 
 ## 환경변수
 
@@ -25,6 +34,9 @@ PAYAPP_REQUEST_KEY=<결제 KEY>
 PAYAPP_FEEDBACK_URL=https://<백엔드 도메인>/api/premium/webhooks/payapp/
 # 프론트 결제 결과 화면을 만들기 전에는 비워둡니다.
 PAYAPP_RETURN_URL=
+PAYAPP_FORTUNE_FEEDBACK_URL=https://<백엔드 도메인>/api/fortune/webhooks/payapp/
+# 프론트 운세 결제 결과 화면을 만들기 전에는 비워둡니다.
+PAYAPP_FORTUNE_RETURN_URL=
 PAYAPP_OPEN_PAY_TYPE=
 PAYAPP_TIMEOUT_SECONDS=10
 ```
@@ -35,14 +47,16 @@ PAYAPP_TIMEOUT_SECONDS=10
 
 1. 현재 변경사항을 배포 이미지에 포함합니다.
 2. EC2 `.env.prod`에 환경변수를 추가합니다.
-3. `python manage.py migrate`로 `premium.0010_payapp_payments`를 적용합니다.
+3. `python manage.py migrate`로 Premium 결제 마이그레이션과 `fortune.0008_fortune_payapp`, `fortune.0009_fortunerefundrequest`를 적용합니다.
 4. 판매자센터의 공통 통보 URL은 비워둡니다. WEE는 각 결제 요청에 `feedbackurl`을 포함하므로 공통 통보 URL이 필요하지 않습니다.
 5. 로그인 사용자의 JWT로 checkout API를 호출하고 반환된 `paymentUrl`을 엽니다.
-6. 결제 후 status API와 Django Admin의 PayApp 결제 내역을 확인합니다.
+6. 결제 후 Premium status 또는 운세 purchase API와 Django Admin의 PayApp 결제 내역을 확인합니다.
 
 ## 검증 및 중복 방지
 
 서버는 판매자 아이디, 연동 KEY, 연동 VALUE, `sha256(userid + responsedate + requestkey)`, 주문 토큰, 상품 식별자, 결제요청번호, 상품명, 2,500원을 검증합니다. `pay_state=4`일 때만 권한을 지급합니다. 동일한 통보가 반복되어도 통보 키와 결제별 지급 시각을 사용해 21일을 중복 지급하지 않습니다.
+
+운세 결제도 같은 판매자 인증값을 검증하되, 금액과 이용 기간은 선택한 `FortuneProduct`의 서버 저장값만 사용합니다. 프론트엔드가 보낸 가격은 받지 않습니다. 동시에 완료된 복수 주문은 이용 기간 뒤에 이어 붙여 결제한 기간이 사라지지 않게 합니다.
 
 ## 환불
 
@@ -55,3 +69,14 @@ PAYAPP_TIMEOUT_SECONDS=10
 3. 환불이 불가능하면 거절 사유를 입력한 뒤 환불 거절 액션을 실행합니다. 거절 시 요청 때 중단한 잔여 이용 기간이 복구됩니다.
 
 PayApp 환불 자체는 자동 호출하지 않습니다. 관리자 액션은 PayApp에서 실제 환불을 마친 뒤에만 실행해야 합니다. PayApp 승인 취소 통보는 거래 상태를 기록하지만 사용자 환불 요청의 운영진 승인·거절 절차를 대신하지 않습니다.
+
+운세 이용권 환불도 같은 운영 절차를 사용합니다.
+
+1. 사용자가 `POST /api/fortune/refund-requests/`로 PayApp 결제 이용권의 환불을 요청합니다.
+2. 요청 당일 운세는 계속 이용할 수 있고 다음 날부터 이용이 중지됩니다.
+3. 환불액은 `결제금액 × 다음 날부터 남은 일수 ÷ 전체 이용일수`를 원 단위로 내림 계산합니다.
+4. 운영진이 PayApp 관리자에서 실제 승인취소를 처리합니다.
+5. Django Admin의 운세 환불 요청에서 `PayApp에서 환불한 선택 요청을 승인·완료 처리` 액션을 실행합니다.
+6. 거절 시에는 심사 중 멈춘 날짜만큼 이용 종료일이 뒤로 복원됩니다.
+
+쿠폰으로 받은 운세 이용권과 마지막 사용일만 남은 이용권은 환불할 수 없습니다. 같은 결제에 대한 중복 요청과 환불 심사 중 추가 결제·쿠폰 등록도 차단합니다.

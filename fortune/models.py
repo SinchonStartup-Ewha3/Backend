@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -143,6 +145,12 @@ class FortunePurchase(models.Model):
         null=True,
         blank=True,
     )
+    payapp_order_token = models.UUIDField(
+        unique=True,
+        null=True,
+        blank=True,
+        editable=False,
+    )
 
     active_from = models.DateField(null=True, blank=True)
     active_until = models.DateField(null=True, blank=True)
@@ -160,6 +168,57 @@ class FortunePurchase(models.Model):
 
     def __str__(self):
         return f"{self.user_id} - {self.product_title}"
+
+    def prepare_payapp_order(self):
+        if self.payapp_order_token is None:
+            self.payapp_order_token = uuid.uuid4()
+        return self.payapp_order_token
+
+
+class FortuneRefundRequest(models.Model):
+    """PayApp 운세 이용권의 일할 환불 요청과 운영진 처리 기록."""
+
+    class Status(models.TextChoices):
+        REQUESTED = "REQUESTED", "요청됨"
+        PROCESSING = "PROCESSING", "처리 중"
+        COMPLETED = "COMPLETED", "환불 완료"
+        REJECTED = "REJECTED", "거절"
+
+    user = models.ForeignKey(
+        settings.AUTH_USER_MODEL,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="fortune_refund_requests",
+    )
+    purchase = models.OneToOneField(
+        FortunePurchase,
+        on_delete=models.PROTECT,
+        related_name="refund_request",
+    )
+    reason = models.CharField(max_length=500)
+    requested_amount = models.PositiveIntegerField()
+    currency_code = models.CharField(max_length=3, default="KRW")
+    unused_days = models.PositiveSmallIntegerField()
+    requested_on = models.DateField()
+    stop_from = models.DateField()
+    original_active_until = models.DateField()
+    status = models.CharField(
+        max_length=20,
+        choices=Status.choices,
+        default=Status.REQUESTED,
+    )
+    rejection_reason = models.CharField(max_length=500, blank=True)
+    completed_at = models.DateTimeField(null=True, blank=True)
+    rejected_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    modified_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.purchase_id} - {self.status}"
 
 
 class FortuneResult(models.Model):
@@ -258,3 +317,25 @@ class FortuneCouponAttempt(models.Model):
 
     def __str__(self):
         return f"{self.user_id} - 실패 {self.failed_count}회"
+
+
+class FortunePayAppFeedbackEvent(models.Model):
+    """민감정보를 제외한 운세 PayApp 통보 처리 및 멱등성 기록."""
+
+    event_key = models.CharField(max_length=64, primary_key=True)
+    purchase = models.ForeignKey(
+        FortunePurchase,
+        on_delete=models.PROTECT,
+        related_name="payapp_feedback_events",
+    )
+    mul_no = models.CharField(max_length=64)
+    pay_state = models.CharField(max_length=10)
+    responsedate = models.CharField(max_length=14)
+    price = models.PositiveIntegerField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-received_at"]
+
+    def __str__(self):
+        return f"{self.mul_no}: {self.pay_state}"

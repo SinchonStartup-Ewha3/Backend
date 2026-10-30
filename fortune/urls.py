@@ -1,10 +1,14 @@
 from django.urls import path
 
 from .views import (
+    FortunePayAppCheckoutView,
+    FortunePayAppFeedbackView,
     FortunePaymentConfirmView,
     FortuneProductListView,
     FortuneProfileView,
     FortunePurchaseCreateView,
+    FortunePurchaseDetailView,
+    FortuneRefundRequestView,
     PurchaseFortuneResultListView,
     TodayFortuneResultView,
     FortuneCouponRedeemView,
@@ -28,7 +32,7 @@ urlpatterns = [
         FortuneProductListView.as_view(),
         name="fortune-product-list",
     ),
-        path(
+    path(
         "purchases/me/",
         MyFortunePassView.as_view(),
         name="fortune-my-passes",
@@ -37,6 +41,26 @@ urlpatterns = [
         "purchases/",
         FortunePurchaseCreateView.as_view(),
         name="fortune-purchase-create",
+    ),
+    path(
+        "purchases/<int:purchase_id>/",
+        FortunePurchaseDetailView.as_view(),
+        name="fortune-purchase-detail",
+    ),
+    path(
+        "payapp/checkout/",
+        FortunePayAppCheckoutView.as_view(),
+        name="fortune-payapp-checkout",
+    ),
+    path(
+        "refund-requests/",
+        FortuneRefundRequestView.as_view(),
+        name="fortune-refund-request",
+    ),
+    path(
+        "webhooks/payapp/",
+        FortunePayAppFeedbackView.as_view(),
+        name="fortune-payapp-feedback",
     ),
     path(
         "purchases/<int:purchase_id>/confirm/",
