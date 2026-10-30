@@ -13,7 +13,9 @@ from fortune.models import (
     FortuneCouponAttempt,
     FortuneProfile,
     FortunePurchase,
+    FortuneRefundRequest,
 )
+from fortune.services.access import usable_purchase_status_q
 
 # 헷갈리는 글자(0, O, 1, I, L)를 뺀 31자
 CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
@@ -42,13 +44,25 @@ def generate_code(length: int | None = None) -> str:
 
 def _next_start_date(user, today):
     """이미 이용 중인 이용권이 있으면 그 다음 날부터 시작한다."""
+    if FortuneRefundRequest.objects.filter(
+        user=user,
+        status__in=[
+            FortuneRefundRequest.Status.REQUESTED,
+            FortuneRefundRequest.Status.PROCESSING,
+        ],
+    ).exists():
+        raise CouponError(
+            "FORTUNE_REFUND_PENDING",
+            "운세 이용권 환불 요청을 처리 중입니다.",
+            409,
+        )
     latest = (
         FortunePurchase.objects.select_for_update()
         .filter(
             user=user,
-            payment_status=FortunePurchase.PaymentStatus.PAID,
             active_until__gte=today,
         )
+        .filter(usable_purchase_status_q(today))
         .order_by("-active_until")
         .first()
     )

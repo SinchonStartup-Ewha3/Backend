@@ -16,6 +16,7 @@ from .models import (
     FortuneProduct,
     FortuneProfile,
     FortunePurchase,
+    FortuneRefundRequest,
     FortuneResult,
 )
 from .serializers import (
@@ -24,11 +25,14 @@ from .serializers import (
     FortunePayAppCheckoutSerializer,
     FortunePurchaseCreateSerializer,
     FortunePurchaseSerializer,
+    FortuneRefundRequestCreateSerializer,
+    FortuneRefundRequestSerializer,
     FortuneResultSerializer,
     FortuneCouponRedeemSerializer
 )
 
 from .services.coupons import CouponError, redeem_coupon
+from .services.access import usable_purchase_status_q
 from .services.generator import (
     get_or_create_fortune_result,
     is_legacy_result,
@@ -40,6 +44,10 @@ from .services.payments import (
     confirm_payment,
 )
 from .services.passes import build_my_passes
+from .services.refunds import (
+    FortuneRefundError,
+    create_fortune_refund_request,
+)
 from .services.payapp import (
     PAYMENT_KEY_PREFIX,
     FortunePayAppAPIError,
@@ -118,6 +126,76 @@ class FortunePurchaseDetailView(generics.RetrieveAPIView):
 
     def get_queryset(self):
         return FortunePurchase.objects.filter(user=self.request.user)
+
+
+class FortuneRefundRequestView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        refund_request = (
+            FortuneRefundRequest.objects.filter(user=request.user)
+            .order_by("-created_at", "-pk")
+            .first()
+        )
+        if refund_request is None:
+            return Response(
+                {
+                    "detail": "운세 이용권 환불 요청 내역이 없습니다.",
+                    "code": "FORTUNE_REFUND_NOT_FOUND",
+                },
+                status=status.HTTP_404_NOT_FOUND,
+            )
+        return Response(FortuneRefundRequestSerializer(refund_request).data)
+
+    def post(self, request):
+        serializer = FortuneRefundRequestCreateSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        purchase = FortunePurchase.objects.filter(
+            pk=serializer.validated_data["purchaseId"],
+            user=request.user,
+        ).first()
+        if purchase is None:
+            return self.error_response(
+                FortuneRefundError(
+                    "NO_REFUNDABLE_FORTUNE_PURCHASE",
+                    "환불 가능한 운세 결제 내역이 없습니다.",
+                )
+            )
+
+        try:
+            refund_request = create_fortune_refund_request(
+                purchase=purchase,
+                user=request.user,
+                reason=serializer.validated_data["reason"],
+            )
+        except FortuneRefundError as exc:
+            return self.error_response(exc)
+        except IntegrityError:
+            existing_request = FortuneRefundRequest.objects.get(
+                purchase=purchase,
+            )
+            return Response(
+                {
+                    "detail": "이미 환불을 요청한 운세 결제입니다.",
+                    "code": "FORTUNE_REFUND_ALREADY_EXISTS",
+                    "refundRequest": FortuneRefundRequestSerializer(
+                        existing_request
+                    ).data,
+                },
+                status=status.HTTP_409_CONFLICT,
+            )
+
+        return Response(
+            FortuneRefundRequestSerializer(refund_request).data,
+            status=status.HTTP_201_CREATED,
+        )
+
+    @staticmethod
+    def error_response(error):
+        return Response(
+            {"detail": error.message, "code": error.code},
+            status=status.HTTP_409_CONFLICT,
+        )
 
 
 class FortunePayAppCheckoutView(APIView):
@@ -342,10 +420,10 @@ class TodayFortuneResultView(APIView):
         active_purchase = (
             FortunePurchase.objects.filter(
                 user=request.user,
-                payment_status=FortunePurchase.PaymentStatus.PAID,
                 active_from__lte=today,
                 active_until__gte=today,
             )
+            .filter(usable_purchase_status_q(today))
             .order_by("-purchased_at")
             .first()
         )
@@ -372,10 +450,10 @@ class PurchaseFortuneResultListView(generics.ListAPIView):
     def get_queryset(self):
         today = timezone.localdate()
         purchase = get_object_or_404(
-            FortunePurchase,
-            id=self.kwargs["purchase_id"],
-            user=self.request.user,
-            payment_status=FortunePurchase.PaymentStatus.PAID,
+            FortunePurchase.objects.filter(
+                id=self.kwargs["purchase_id"],
+                user=self.request.user,
+            ).filter(usable_purchase_status_q(today)),
         )
 
         results = list(
@@ -417,7 +495,7 @@ class FortuneCouponRedeemView(APIView):
         )
 
 class MyFortunePassView(APIView):
-    """마이페이지 결제 관리: 내 운세 이용권 현황 (굿즈 쿠폰 코드로 받은 이용권만)"""
+    """마이페이지 결제 관리: 쿠폰과 PayApp 운세 이용권 현황."""
     permission_classes = [IsAuthenticated]
 
     def get(self, request):

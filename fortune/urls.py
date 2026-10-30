@@ -8,6 +8,7 @@ from .views import (
     FortuneProfileView,
     FortunePurchaseCreateView,
     FortunePurchaseDetailView,
+    FortuneRefundRequestView,
     PurchaseFortuneResultListView,
     TodayFortuneResultView,
     FortuneCouponRedeemView,
@@ -50,6 +51,11 @@ urlpatterns = [
         "payapp/checkout/",
         FortunePayAppCheckoutView.as_view(),
         name="fortune-payapp-checkout",
+    ),
+    path(
+        "refund-requests/",
+        FortuneRefundRequestView.as_view(),
+        name="fortune-refund-request",
     ),
     path(
         "webhooks/payapp/",

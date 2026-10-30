@@ -5,9 +5,11 @@ from .models import (
     FortuneProduct,
     FortuneProfile,
     FortunePurchase,
+    FortuneRefundRequest,
     FortuneResult,
 )
 from .services.calender import convert_to_solar_date
+from .services.access import usable_purchase_status_q
 from .services.generator import WEATHER_LABELS
 from .services.saju import LuckLevel
 
@@ -119,12 +121,26 @@ class FortunePurchaseCreateSerializer(serializers.Serializer):
                 "생년월일 정보를 먼저 입력해주세요."
             )
 
-        # 이미 사용 중인 유료 운세 상품이 있으면 중복 구매하지 못하게 합니다.
-        if FortunePurchase.objects.filter(
+        if FortuneRefundRequest.objects.filter(
             user=user,
-            payment_status=FortunePurchase.PaymentStatus.PAID,
-            active_until__gte=today,
+            status__in=[
+                FortuneRefundRequest.Status.REQUESTED,
+                FortuneRefundRequest.Status.PROCESSING,
+            ],
         ).exists():
+            raise serializers.ValidationError(
+                "운세 이용권 환불 요청을 처리 중입니다."
+            )
+
+        # 이미 사용 중인 유료 운세 상품이 있으면 중복 구매하지 못하게 합니다.
+        if (
+            FortunePurchase.objects.filter(
+                user=user,
+                active_until__gte=today,
+            )
+            .filter(usable_purchase_status_q(today))
+            .exists()
+        ):
             raise serializers.ValidationError(
                 "현재 이용 중인 운세 상품이 있습니다."
             )
@@ -183,6 +199,66 @@ class FortunePurchaseSerializer(serializers.ModelSerializer):
             "purchased_at",
             "created_at",
         ]
+
+
+class FortuneRefundRequestCreateSerializer(serializers.Serializer):
+    purchaseId = serializers.IntegerField()
+    reason = serializers.CharField(
+        max_length=500,
+        allow_blank=False,
+        trim_whitespace=True,
+        error_messages={
+            "required": "환불 사유를 입력해주세요.",
+            "blank": "환불 사유를 입력해주세요.",
+        },
+    )
+
+
+class FortuneRefundRequestSerializer(serializers.ModelSerializer):
+    refundRequestId = serializers.IntegerField(source="pk", read_only=True)
+    purchaseId = serializers.IntegerField(source="purchase_id", read_only=True)
+    paymentMethod = serializers.SerializerMethodField()
+    requestedAmount = serializers.IntegerField(
+        source="requested_amount",
+        read_only=True,
+    )
+    currencyCode = serializers.CharField(
+        source="currency_code",
+        read_only=True,
+    )
+    unusedDays = serializers.IntegerField(source="unused_days", read_only=True)
+    requestedOn = serializers.DateField(source="requested_on", read_only=True)
+    stopFrom = serializers.DateField(source="stop_from", read_only=True)
+    requestedAt = serializers.DateTimeField(source="created_at", read_only=True)
+    completedAt = serializers.DateTimeField(source="completed_at", read_only=True)
+    rejectedAt = serializers.DateTimeField(source="rejected_at", read_only=True)
+    rejectionReason = serializers.CharField(
+        source="rejection_reason",
+        read_only=True,
+    )
+
+    class Meta:
+        model = FortuneRefundRequest
+        fields = [
+            "refundRequestId",
+            "purchaseId",
+            "paymentMethod",
+            "reason",
+            "requestedAmount",
+            "currencyCode",
+            "unusedDays",
+            "requestedOn",
+            "stopFrom",
+            "status",
+            "rejectionReason",
+            "requestedAt",
+            "completedAt",
+            "rejectedAt",
+        ]
+        read_only_fields = ["reason", "status"]
+
+    def get_paymentMethod(self, obj):
+        return "PAYAPP"
 
 
 class FortuneResultSerializer(serializers.ModelSerializer):
