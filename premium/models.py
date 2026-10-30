@@ -216,7 +216,7 @@ class PayAppFeedbackEvent(models.Model):
 
 
 class PremiumRefundRequest(models.Model):
-    """운영진이 Paddle 대시보드에서 처리하는 프리미엄 환불 요청."""
+    """사용자가 접수하고 운영진이 결제수단별로 처리하는 환불 요청."""
 
     class Status(models.TextChoices):
         REQUESTED = "REQUESTED", "환불 요청"
@@ -240,6 +240,13 @@ class PremiumRefundRequest(models.Model):
     )
     bank_transfer_request = models.OneToOneField(
         BankTransferRequest,
+        on_delete=models.PROTECT,
+        related_name="refund_request",
+        null=True,
+        blank=True,
+    )
+    payapp_payment = models.OneToOneField(
+        PayAppPayment,
         on_delete=models.PROTECT,
         related_name="refund_request",
         null=True,
@@ -273,15 +280,32 @@ class PremiumRefundRequest(models.Model):
         constraints = [
             models.CheckConstraint(
                 condition=(
-                    Q(purchase__isnull=False, bank_transfer_request__isnull=True)
-                    | Q(purchase__isnull=True, bank_transfer_request__isnull=False)
+                    Q(
+                        purchase__isnull=False,
+                        bank_transfer_request__isnull=True,
+                        payapp_payment__isnull=True,
+                    )
+                    | Q(
+                        purchase__isnull=True,
+                        bank_transfer_request__isnull=False,
+                        payapp_payment__isnull=True,
+                    )
+                    | Q(
+                        purchase__isnull=True,
+                        bank_transfer_request__isnull=True,
+                        payapp_payment__isnull=False,
+                    )
                 ),
                 name="refund_exactly_one_payment_source",
             ),
         ]
 
     def __str__(self):
-        payment_id = self.purchase_id or self.bank_transfer_request_id
+        payment_id = (
+            self.purchase_id
+            or self.bank_transfer_request_id
+            or self.payapp_payment_id
+        )
         return f"{self.user_id} - {payment_id} - {self.status}"
 
 

@@ -2,7 +2,9 @@ import hashlib
 from datetime import timedelta
 from unittest.mock import Mock, patch
 
+from django.db import connection, transaction
 from django.test import override_settings
+from django.test.utils import CaptureQueriesContext
 from django.urls import reverse
 from django.utils import timezone
 from rest_framework.test import APITestCase
@@ -166,6 +168,19 @@ class PayAppFeedbackTests(APITestCase):
         )
         self.assertEqual(self.payment.entitlement_expires_at, entitlement.expires_at)
         self.assertEqual(PayAppFeedbackEvent.objects.count(), 1)
+
+    def test_payment_lock_query_does_not_join_nullable_user(self):
+        from .services.payapp import _find_payment
+
+        with transaction.atomic(), CaptureQueriesContext(connection) as queries:
+            payment = _find_payment(self.payment.order_token)
+
+        self.assertEqual(payment, self.payment)
+        select_sql = next(
+            query["sql"] for query in queries.captured_queries
+            if "premium_payapppayment" in query["sql"]
+        )
+        self.assertNotIn(" JOIN ", select_sql.upper())
 
     def test_duplicate_feedback_does_not_grant_twice(self):
         payload = self.feedback()

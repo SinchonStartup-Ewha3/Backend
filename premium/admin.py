@@ -17,6 +17,7 @@ from .services.bank_transfers import (
 from .services.refunds import (
     RefundCalculationError,
     complete_bank_transfer_refund,
+    complete_payapp_refund,
     reject_refund_request,
 )
 
@@ -179,6 +180,7 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
         "user",
         "purchase",
         "bank_transfer_request",
+        "payapp_payment",
         "reason",
         "requested_amount",
         "currency_code",
@@ -193,6 +195,7 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
         "user",
         "purchase",
         "bank_transfer_request",
+        "payapp_payment",
         "reason",
         "requested_amount",
         "currency_code",
@@ -207,6 +210,7 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
     )
     actions = (
         "mark_as_processing",
+        "complete_payapp_selected",
         "complete_bank_transfer_selected",
         "mark_as_rejected",
     )
@@ -228,6 +232,23 @@ class PremiumRefundRequestAdmin(admin.ModelAdmin):
         for refund_request in queryset:
             try:
                 complete_bank_transfer_refund(refund_request)
+                completed += 1
+            except RefundCalculationError:
+                skipped += 1
+        self.message_user(
+            request,
+            f"{completed}건을 완료했습니다. 건너뜀: {skipped}건",
+        )
+
+    @admin.action(
+        description="PayApp에서 환불한 선택 요청을 승인·완료 처리"
+    )
+    def complete_payapp_selected(self, request, queryset):
+        completed = 0
+        skipped = 0
+        for refund_request in queryset:
+            try:
+                complete_payapp_refund(refund_request)
                 completed += 1
             except RefundCalculationError:
                 skipped += 1

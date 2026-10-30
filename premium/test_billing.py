@@ -137,7 +137,7 @@ class PremiumBillingAPITests(APITestCase):
             latest_purchase.pk,
         )
 
-    def test_returns_latest_payapp_payment_as_non_refundable(self):
+    def test_returns_latest_payapp_payment_as_refundable(self):
         started_at = self.now - timedelta(days=1)
         expires_at = self.now + timedelta(days=20)
         PremiumEntitlement.objects.create(
@@ -167,7 +167,7 @@ class PremiumBillingAPITests(APITestCase):
         self.assertEqual(subscription["expiresAt"], expires_at)
         self.assertTrue(subscription["isActive"])
         self.assertGreater(subscription["remainingSeconds"], 0)
-        self.assertFalse(subscription["canRequestRefund"])
+        self.assertTrue(subscription["canRequestRefund"])
 
     def test_suspended_bank_transfer_refund_is_not_active(self):
         started_at = self.now - timedelta(days=1)

@@ -161,6 +161,17 @@ def _event_key(data):
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _find_payment(order_token):
+    try:
+        return PayAppPayment.objects.select_for_update().get(
+            order_token=order_token,
+        )
+    except (PayAppPayment.DoesNotExist, ValueError) as exc:
+        raise PayAppFeedbackValidationError(
+            "PayApp 통보에 연결된 WEE 주문이 없습니다."
+        ) from exc
+
+
 @transaction.atomic
 def process_feedback(data):
     occurred_at = verify_feedback(data)
@@ -171,16 +182,7 @@ def process_feedback(data):
             "PayApp 결제 금액 형식이 올바르지 않습니다."
         ) from exc
 
-    try:
-        payment = (
-            PayAppPayment.objects.select_for_update()
-            .select_related("user")
-            .get(order_token=data["var1"])
-        )
-    except (PayAppPayment.DoesNotExist, ValueError) as exc:
-        raise PayAppFeedbackValidationError(
-            "PayApp 통보에 연결된 WEE 주문이 없습니다."
-        ) from exc
+    payment = _find_payment(data["var1"])
 
     if payment.mul_no != str(data["mul_no"]) and payment.mul_no != str(
         data.get("orig_mul_no") or ""

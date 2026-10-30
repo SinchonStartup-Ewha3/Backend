@@ -191,6 +191,10 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
         source="bank_transfer_request_id",
         read_only=True,
     )
+    payAppPaymentId = serializers.IntegerField(
+        source="payapp_payment_id",
+        read_only=True,
+    )
     paymentMethod = serializers.SerializerMethodField()
     reason = serializers.CharField(
         max_length=500,
@@ -238,6 +242,7 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
             "refundRequestId",
             "purchaseId",
             "bankTransferRequestId",
+            "payAppPaymentId",
             "paymentMethod",
             "reason",
             "requestedAmount",
@@ -254,4 +259,8 @@ class PremiumRefundRequestSerializer(serializers.ModelSerializer):
         read_only_fields = ["status"]
 
     def get_paymentMethod(self, obj):
-        return "BANK_TRANSFER" if obj.bank_transfer_request_id else "PADDLE"
+        if obj.payapp_payment_id:
+            return "PAYAPP"
+        if obj.bank_transfer_request_id:
+            return "BANK_TRANSFER"
+        return "PADDLE"
