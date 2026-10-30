@@ -64,15 +64,14 @@ class MyFortunePassAPITests(APITestCase):
         self.assertEqual(res.data["coins"], {"remaining": 8, "total": 8})
         self.assertEqual(res.data["latest"]["purchase_id"], upcoming.pk)  # 가장 최근에 받은 것
 
-    def test_only_coupon_passes_are_shown(self):
-        # 운세는 앱 결제를 쓰지 않으므로, 쿠폰이 아닌 구매 기록은 보여주지 않는다
-        self.make_purchase("FORTUNE_7D", self.today, coupon=False)
+    def test_payapp_passes_are_shown(self):
+        purchase = self.make_purchase("FORTUNE_7D", self.today, coupon=False)
 
         res = self.client.get(self.url)
 
-        self.assertEqual(res.data["coins"], {"remaining": 0, "total": 0})
-        self.assertIsNone(res.data["current"])
-        self.assertIsNone(res.data["latest"])
+        self.assertEqual(res.data["coins"], {"remaining": 7, "total": 7})
+        self.assertEqual(res.data["current"]["purchase_id"], purchase.pk)
+        self.assertEqual(res.data["current"]["payment_method"], "PAYAPP")
 
     def test_expired_and_unpaid_are_excluded_from_coins(self):
         expired = self.make_purchase("FORTUNE_7D", self.today - timedelta(days=30), redeemed_days_ago=30)

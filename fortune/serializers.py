@@ -155,6 +155,20 @@ class FortunePurchaseCreateSerializer(serializers.Serializer):
         )
 
 
+class FortunePayAppCheckoutSerializer(FortunePurchaseCreateSerializer):
+    recvphone = serializers.RegexField(
+        regex=r"^01[016789]\d{7,8}$",
+        max_length=11,
+        error_messages={
+            "invalid": "휴대전화 번호는 하이픈 없이 입력해주세요.",
+        },
+    )
+
+    def create(self, validated_data):
+        validated_data.pop("recvphone")
+        return super().create(validated_data)
+
+
 class FortunePurchaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = FortunePurchase

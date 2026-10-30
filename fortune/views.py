@@ -1,12 +1,14 @@
+import logging
 from datetime import timedelta
 
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.http import HttpResponse
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 
 from rest_framework import generics, status
 from rest_framework.exceptions import ValidationError
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -19,6 +21,7 @@ from .models import (
 from .serializers import (
     FortuneProductSerializer,
     FortuneProfileSerializer,
+    FortunePayAppCheckoutSerializer,
     FortunePurchaseCreateSerializer,
     FortunePurchaseSerializer,
     FortuneResultSerializer,
@@ -37,6 +40,18 @@ from .services.payments import (
     confirm_payment,
 )
 from .services.passes import build_my_passes
+from .services.payapp import (
+    PAYMENT_KEY_PREFIX,
+    FortunePayAppAPIError,
+    FortunePayAppConfigurationError,
+    FortunePayAppFeedbackValidationError,
+    create_payment_request as create_fortune_payment_request,
+    process_feedback as process_fortune_feedback,
+    validate_payapp_settings as validate_fortune_payapp_settings,
+)
+
+
+logger = logging.getLogger(__name__)
 
 
 class FortuneProfileView(APIView):
@@ -94,6 +109,110 @@ class FortunePurchaseCreateView(generics.CreateAPIView):
             FortunePurchaseSerializer(purchase).data,
             status=status.HTTP_201_CREATED,
         )
+
+
+class FortunePurchaseDetailView(generics.RetrieveAPIView):
+    serializer_class = FortunePurchaseSerializer
+    permission_classes = [IsAuthenticated]
+    lookup_url_kwarg = "purchase_id"
+
+    def get_queryset(self):
+        return FortunePurchase.objects.filter(user=self.request.user)
+
+
+class FortunePayAppCheckoutView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        serializer = FortunePayAppCheckoutSerializer(
+            data=request.data,
+            context={"request": request},
+        )
+        serializer.is_valid(raise_exception=True)
+        try:
+            validate_fortune_payapp_settings()
+        except FortunePayAppConfigurationError as exc:
+            return Response(
+                {"detail": str(exc), "code": "PAYAPP_NOT_CONFIGURED"},
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+
+        recvphone = serializer.validated_data["recvphone"]
+        purchase = serializer.save()
+        purchase.prepare_payapp_order()
+        purchase.save(update_fields=["payapp_order_token"])
+
+        try:
+            payapp_response = create_fortune_payment_request(
+                purchase=purchase,
+                recvphone=recvphone,
+            )
+        except (FortunePayAppAPIError, FortunePayAppConfigurationError) as exc:
+            purchase.payment_status = FortunePurchase.PaymentStatus.FAILED
+            purchase.save(update_fields=["payment_status"])
+            return Response(
+                {"detail": str(exc), "code": "PAYAPP_PAYMENT_REQUEST_FAILED"},
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        purchase.payment_key = (
+            f"{PAYMENT_KEY_PREFIX}{payapp_response['mul_no']}"
+        )
+        try:
+            purchase.save(update_fields=["payment_key"])
+        except IntegrityError:
+            purchase.payment_key = None
+            purchase.payment_status = FortunePurchase.PaymentStatus.FAILED
+            purchase.save(update_fields=["payment_key", "payment_status"])
+            return Response(
+                {
+                    "detail": "이미 처리된 PayApp 결제요청번호가 반환되었습니다.",
+                    "code": "PAYAPP_DUPLICATE_MUL_NO",
+                },
+                status=status.HTTP_502_BAD_GATEWAY,
+            )
+
+        return Response(
+            {
+                "purchaseId": purchase.pk,
+                "mulNo": str(payapp_response["mul_no"]),
+                "paymentUrl": payapp_response["payurl"],
+                "status": purchase.payment_status,
+                "purchase": FortunePurchaseSerializer(purchase).data,
+            },
+            status=status.HTTP_201_CREATED,
+        )
+
+
+class FortunePayAppFeedbackView(APIView):
+    authentication_classes = []
+    permission_classes = [AllowAny]
+
+    def post(self, request):
+        try:
+            validate_fortune_payapp_settings()
+        except FortunePayAppConfigurationError:
+            return HttpResponse(
+                "FAIL",
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+                content_type="text/plain; charset=utf-8",
+            )
+
+        data = (
+            request.data.dict()
+            if hasattr(request.data, "dict")
+            else dict(request.data)
+        )
+        try:
+            process_fortune_feedback(data)
+        except FortunePayAppFeedbackValidationError as exc:
+            logger.warning("Fortune PayApp feedback rejected: %s", exc)
+            return HttpResponse(
+                "FAIL",
+                status=status.HTTP_400_BAD_REQUEST,
+                content_type="text/plain; charset=utf-8",
+            )
+        return HttpResponse("SUCCESS", content_type="text/plain; charset=utf-8")
 
 
 class FortunePaymentConfirmView(APIView):

@@ -1,3 +1,5 @@
+import uuid
+
 from django.conf import settings
 from django.core.exceptions import ValidationError
 from django.db import models
@@ -143,6 +145,12 @@ class FortunePurchase(models.Model):
         null=True,
         blank=True,
     )
+    payapp_order_token = models.UUIDField(
+        unique=True,
+        null=True,
+        blank=True,
+        editable=False,
+    )
 
     active_from = models.DateField(null=True, blank=True)
     active_until = models.DateField(null=True, blank=True)
@@ -160,6 +168,11 @@ class FortunePurchase(models.Model):
 
     def __str__(self):
         return f"{self.user_id} - {self.product_title}"
+
+    def prepare_payapp_order(self):
+        if self.payapp_order_token is None:
+            self.payapp_order_token = uuid.uuid4()
+        return self.payapp_order_token
 
 
 class FortuneResult(models.Model):
@@ -257,3 +270,25 @@ class FortuneCouponAttempt(models.Model):
 
     def __str__(self):
         return f"{self.user_id} - 실패 {self.failed_count}회"
+
+
+class FortunePayAppFeedbackEvent(models.Model):
+    """민감정보를 제외한 운세 PayApp 통보 처리 및 멱등성 기록."""
+
+    event_key = models.CharField(max_length=64, primary_key=True)
+    purchase = models.ForeignKey(
+        FortunePurchase,
+        on_delete=models.PROTECT,
+        related_name="payapp_feedback_events",
+    )
+    mul_no = models.CharField(max_length=64)
+    pay_state = models.CharField(max_length=10)
+    responsedate = models.CharField(max_length=14)
+    price = models.PositiveIntegerField()
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ["-received_at"]
+
+    def __str__(self):
+        return f"{self.mul_no}: {self.pay_state}"

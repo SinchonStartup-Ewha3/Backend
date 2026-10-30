@@ -7,6 +7,7 @@ from .models import (
     FortuneResult,
     FortuneCoupon,
     FortuneCouponAttempt,
+    FortunePayAppFeedbackEvent,
 )
 
 
@@ -78,3 +79,26 @@ class FortuneCouponAttemptAdmin(admin.ModelAdmin):
 
     list_display = ("user", "failed_count", "locked_until", "modified_at")
     search_fields = ("user__nickname",)
+
+
+@admin.register(FortunePayAppFeedbackEvent)
+class FortunePayAppFeedbackEventAdmin(admin.ModelAdmin):
+    list_display = (
+        "event_key",
+        "purchase",
+        "mul_no",
+        "pay_state",
+        "price",
+        "received_at",
+    )
+    list_filter = ("pay_state",)
+    search_fields = ("event_key", "mul_no", "purchase__user__nickname")
+    readonly_fields = (
+        "event_key",
+        "purchase",
+        "mul_no",
+        "pay_state",
+        "responsedate",
+        "price",
+        "received_at",
+    )
