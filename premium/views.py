@@ -29,11 +29,8 @@ from .serializers import (
     PremiumRefundRequestSerializer,
 )
 from .services.paddle import (
-    PaddleAPIError,
     PaddleConfigurationError,
     PaddleWebhookSignatureError,
-    create_transaction,
-    validate_paddle_settings,
     verify_webhook_signature,
 )
 from .services.refunds import (
@@ -159,11 +156,23 @@ class PremiumStatusView(APIView):
             )
             .exists()
         )
-        active_payapp_payment = PayAppPayment.objects.filter(
-            user=request.user,
-            entitlement_started_at__lte=now,
-            entitlement_expires_at__gt=now,
-        ).exists()
+        active_payapp_payment = (
+            PayAppPayment.objects.filter(
+                user=request.user,
+                status=PayAppPayment.Status.COMPLETED,
+                refund_confirmed_at__isnull=True,
+                entitlement_started_at__lte=now,
+                entitlement_expires_at__gt=now,
+            )
+            .exclude(
+                refund_request__status__in=[
+                    PremiumRefundRequest.Status.REQUESTED,
+                    PremiumRefundRequest.Status.PROCESSING,
+                    PremiumRefundRequest.Status.COMPLETED,
+                ]
+            )
+            .exists()
+        )
         active_paddle_purchase = PremiumPurchase.objects.filter(
             user=request.user,
             status__in=[
@@ -321,10 +330,28 @@ class PremiumBillingView(APIView):
             entitlement_expires_at__gt=now,
             refund_request__isnull=True,
         ).exists()
+        payapp_can_refund = PayAppPayment.objects.filter(
+            pk=latest_payapp_payment.pk if latest_payapp_payment else None,
+            status=PayAppPayment.Status.COMPLETED,
+            refund_confirmed_at__isnull=True,
+            entitlement_expires_at__gt=now,
+            refund_request__isnull=True,
+        ).exists()
         bank_refund_blocks_access = bool(
             latest_bank_transfer
             and PremiumRefundRequest.objects.filter(
                 bank_transfer_request=latest_bank_transfer,
+                status__in=[
+                    PremiumRefundRequest.Status.REQUESTED,
+                    PremiumRefundRequest.Status.PROCESSING,
+                    PremiumRefundRequest.Status.COMPLETED,
+                ],
+            ).exists()
+        )
+        payapp_refund_blocks_access = bool(
+            latest_payapp_payment
+            and PremiumRefundRequest.objects.filter(
+                payapp_payment=latest_payapp_payment,
                 status__in=[
                     PremiumRefundRequest.Status.REQUESTED,
                     PremiumRefundRequest.Status.PROCESSING,
@@ -360,6 +387,7 @@ class PremiumBillingView(APIView):
         if use_payapp:
             payapp_is_active = bool(
                 is_premium
+                and not payapp_refund_blocks_access
                 and latest_payapp_payment.entitlement_started_at
                 and latest_payapp_payment.entitlement_expires_at
                 and latest_payapp_payment.entitlement_started_at <= now
@@ -377,7 +405,7 @@ class PremiumBillingView(APIView):
                 "expiresAt": latest_payapp_payment.entitlement_expires_at,
                 "isActive": payapp_is_active,
                 "remainingSeconds": remaining_seconds if payapp_is_active else 0,
-                "canRequestRefund": False,
+                "canRequestRefund": payapp_can_refund,
             }
         elif use_bank_transfer:
             bank_is_active = bool(
@@ -425,42 +453,12 @@ class PremiumCheckoutView(APIView):
     permission_classes = [IsAuthenticated]
 
     def post(self, request):
-        try:
-            validate_paddle_settings()
-        except PaddleConfigurationError as exc:
-            return Response(
-                {"detail": str(exc), "code": "PADDLE_NOT_CONFIGURED"},
-                status=status.HTTP_503_SERVICE_UNAVAILABLE,
-            )
-
-        purchase = PremiumPurchase.objects.create(
-            user=request.user,
-            paddle_price_id=settings.PADDLE_PRICE_ID,
-            amount=settings.PADDLE_PREMIUM_AMOUNT,
-            currency_code=settings.PADDLE_PREMIUM_CURRENCY,
-        )
-        try:
-            paddle_transaction = create_transaction(purchase=purchase)
-        except (PaddleAPIError, PaddleConfigurationError) as exc:
-            purchase.status = PremiumPurchase.Status.FAILED
-            purchase.failure_reason = str(exc)[:255]
-            purchase.save(update_fields=["status", "failure_reason", "modified_at"])
-            return Response(
-                {"detail": str(exc), "code": "PADDLE_TRANSACTION_FAILED"},
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
-
-        purchase.paddle_transaction_id = paddle_transaction["id"]
-        purchase.save(update_fields=["paddle_transaction_id", "modified_at"])
-        checkout = paddle_transaction.get("checkout") or {}
         return Response(
             {
-                "purchaseId": purchase.pk,
-                "transactionId": purchase.paddle_transaction_id,
-                "checkoutUrl": checkout.get("url"),
-                "status": purchase.status,
+                "detail": "Paddle 결제는 더 이상 지원하지 않습니다.",
+                "code": "PADDLE_DISABLED",
             },
-            status=status.HTTP_201_CREATED,
+            status=status.HTTP_410_GONE,
         )
 
 
@@ -542,7 +540,7 @@ class PremiumRefundRequestView(APIView):
     def get(self, request):
         refund_request = (
             PremiumRefundRequest.objects.filter(user=request.user)
-            .select_related("purchase", "bank_transfer_request")
+            .select_related("purchase", "bank_transfer_request", "payapp_payment")
             .first()
         )
         if refund_request is None:
@@ -557,6 +555,16 @@ class PremiumRefundRequestView(APIView):
 
     def post(self, request):
         now = timezone.now()
+        payapp_payment = (
+            PayAppPayment.objects.filter(
+                user=request.user,
+                status=PayAppPayment.Status.COMPLETED,
+                refund_confirmed_at__isnull=True,
+                entitlement_expires_at__gt=now,
+            )
+            .order_by("-completed_at", "-pk")
+            .first()
+        )
         bank_transfer_request = (
             BankTransferRequest.objects.filter(
                 user=request.user,
@@ -576,14 +584,19 @@ class PremiumRefundRequestView(APIView):
             .order_by("-completed_at", "-pk")
             .first()
         )
-        if bank_transfer_request is None and purchase is None:
+        if (
+            payapp_payment is None
+            and bank_transfer_request is None
+            and purchase is None
+        ):
             return self.no_refundable_purchase_response()
 
-        source_filter = (
-            {"bank_transfer_request": bank_transfer_request}
-            if bank_transfer_request is not None
-            else {"purchase": purchase}
-        )
+        if payapp_payment is not None:
+            source_filter = {"payapp_payment": payapp_payment}
+        elif bank_transfer_request is not None:
+            source_filter = {"bank_transfer_request": bank_transfer_request}
+        else:
+            source_filter = {"purchase": purchase}
         existing_request = PremiumRefundRequest.objects.filter(**source_filter).first()
         if existing_request is not None:
             return self.duplicate_request_response(existing_request)
@@ -592,7 +605,26 @@ class PremiumRefundRequestView(APIView):
         serializer.is_valid(raise_exception=True)
         try:
             with transaction.atomic():
-                if bank_transfer_request is not None:
+                if payapp_payment is not None:
+                    payapp_payment = PayAppPayment.objects.select_for_update().get(
+                        pk=payapp_payment.pk,
+                        user=request.user,
+                        status=PayAppPayment.Status.COMPLETED,
+                        refund_confirmed_at__isnull=True,
+                        entitlement_expires_at__gt=timezone.now(),
+                    )
+                    prorated_refund = calculate_prorated_refund(
+                        payapp_payment,
+                        requested_at=now,
+                    )
+                    refund_request = serializer.save(
+                        user=request.user,
+                        payapp_payment=payapp_payment,
+                        requested_amount=prorated_refund.amount,
+                        currency_code=payapp_payment.currency_code,
+                        remaining_seconds=prorated_refund.remaining_seconds,
+                    )
+                elif bank_transfer_request is not None:
                     bank_transfer_request = (
                         BankTransferRequest.objects.select_for_update().get(
                             pk=bank_transfer_request.pk,
@@ -636,6 +668,7 @@ class PremiumRefundRequestView(APIView):
                     suspended_at=now,
                 )
         except (
+            PayAppPayment.DoesNotExist,
             PremiumPurchase.DoesNotExist,
             BankTransferRequest.DoesNotExist,
             RefundCalculationError,
@@ -746,4 +779,10 @@ class PayAppFeedbackView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
                 content_type="text/plain; charset=utf-8",
             )
+        except Exception:
+            logger.exception(
+                "Unexpected error while processing PayApp feedback.",
+                extra={"payapp_mul_no": data.get("mul_no")},
+            )
+            raise
         return HttpResponse("SUCCESS", content_type="text/plain; charset=utf-8")

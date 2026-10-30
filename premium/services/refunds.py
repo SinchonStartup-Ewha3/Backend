@@ -7,6 +7,7 @@ from django.utils import timezone
 
 from premium.models import (
     BankTransferRequest,
+    PayAppPayment,
     PremiumEntitlement,
     PremiumRefundRequest,
 )
@@ -55,15 +56,17 @@ def _refund_user(refund_request):
         return refund_request.user
     if refund_request.purchase_id:
         return refund_request.purchase.user
+    if refund_request.payapp_payment_id:
+        return refund_request.payapp_payment.user
     return refund_request.bank_transfer_request.user
 
 
 def _refund_source(refund_request):
-    return (
-        refund_request.purchase
-        if refund_request.purchase_id
-        else refund_request.bank_transfer_request
-    )
+    if refund_request.purchase_id:
+        return refund_request.purchase
+    if refund_request.payapp_payment_id:
+        return refund_request.payapp_payment
+    return refund_request.bank_transfer_request
 
 
 def _source_unused_duration(refund_request, at):
@@ -81,7 +84,6 @@ def suspend_refund_access(refund_request, *, suspended_at=None):
     suspended_at = suspended_at or timezone.now()
     locked_request = (
         PremiumRefundRequest.objects.select_for_update()
-        .select_related("user", "purchase__user", "bank_transfer_request__user")
         .get(pk=refund_request.pk)
     )
     if locked_request.access_suspended_at is not None:
@@ -115,7 +117,6 @@ def reject_refund_request(refund_request, *, reason, rejected_at=None):
     rejected_at = rejected_at or timezone.now()
     locked_request = (
         PremiumRefundRequest.objects.select_for_update()
-        .select_related("user", "purchase__user", "bank_transfer_request__user")
         .get(pk=refund_request.pk)
     )
     if locked_request.status == PremiumRefundRequest.Status.COMPLETED:
@@ -165,7 +166,6 @@ def complete_bank_transfer_refund(refund_request, *, completed_at=None):
     completed_at = completed_at or timezone.now()
     locked_request = (
         PremiumRefundRequest.objects.select_for_update()
-        .select_related("bank_transfer_request__user")
         .get(pk=refund_request.pk)
     )
     if locked_request.bank_transfer_request_id is None:
@@ -203,6 +203,81 @@ def complete_bank_transfer_refund(refund_request, *, completed_at=None):
     transfer.status = BankTransferRequest.Status.REFUNDED
     transfer.refunded_at = completed_at
     transfer.save(update_fields=["status", "refunded_at", "modified_at"])
+
+    locked_request.status = PremiumRefundRequest.Status.COMPLETED
+    locked_request.completed_at = completed_at
+    locked_request.rejection_reason = ""
+    locked_request.save(
+        update_fields=[
+            "status",
+            "completed_at",
+            "rejection_reason",
+            "modified_at",
+        ]
+    )
+    return locked_request
+
+
+@transaction.atomic
+def complete_payapp_refund(refund_request, *, completed_at=None):
+    """PayApp 관리자에서 환불한 요청을 운영진 확인 후 완료 처리한다."""
+    completed_at = completed_at or timezone.now()
+    locked_request = (
+        PremiumRefundRequest.objects.select_for_update()
+        .get(pk=refund_request.pk)
+    )
+    if locked_request.payapp_payment_id is None:
+        raise RefundCalculationError("PayApp 환불 요청이 아닙니다.")
+    if locked_request.status == PremiumRefundRequest.Status.COMPLETED:
+        return locked_request
+    if locked_request.status == PremiumRefundRequest.Status.REJECTED:
+        raise RefundCalculationError("거절된 환불 요청은 완료 처리할 수 없습니다.")
+
+    payment = PayAppPayment.objects.select_for_update().get(
+        pk=locked_request.payapp_payment_id,
+    )
+    entitlement = (
+        PremiumEntitlement.objects.select_for_update()
+        .filter(user=payment.user)
+        .first()
+    )
+    if (
+        locked_request.access_suspended_at is None
+        and entitlement
+        and entitlement.expires_at
+        and entitlement.expires_at > completed_at
+    ):
+        unused_from = max(completed_at, payment.entitlement_started_at)
+        unused_duration = max(
+            timedelta(0),
+            payment.entitlement_expires_at - unused_from,
+        )
+        entitlement.expires_at = max(
+            completed_at,
+            entitlement.expires_at - unused_duration,
+        )
+        entitlement.save(update_fields=["expires_at", "modified_at"])
+
+    payment.status = (
+        PayAppPayment.Status.APPROVAL_CANCELED
+        if locked_request.requested_amount >= payment.amount
+        else PayAppPayment.Status.PARTIALLY_CANCELED
+    )
+    payment.provider_canceled_at = completed_at
+    payment.refund_confirmed_at = completed_at
+    note = "PayApp 관리자 환불 확인 후 환불 요청 완료 처리"
+    payment.admin_note = (
+        f"{payment.admin_note} | {note}" if payment.admin_note else note
+    )[:255]
+    payment.save(
+        update_fields=[
+            "status",
+            "provider_canceled_at",
+            "refund_confirmed_at",
+            "admin_note",
+            "modified_at",
+        ]
+    )
 
     locked_request.status = PremiumRefundRequest.Status.COMPLETED
     locked_request.completed_at = completed_at

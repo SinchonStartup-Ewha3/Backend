@@ -50,21 +50,12 @@ class PremiumCheckoutAPITests(APITestCase):
         response = self.client.post(reverse("premium:checkout"))
         self.assertEqual(response.status_code, status.HTTP_401_UNAUTHORIZED)
 
-    @patch("premium.views.create_transaction")
-    def test_creates_server_side_transaction_for_configured_price(self, mocked_create):
-        mocked_create.return_value = {
-            "id": "txn_checkout",
-            "checkout": {"url": "https://sandbox-checkout.paddle.com/test"},
-        }
+    def test_legacy_paddle_checkout_is_disabled(self):
         response = self.client.post(reverse("premium:checkout"))
 
-        self.assertEqual(response.status_code, status.HTTP_201_CREATED)
-        self.assertEqual(response.data["transactionId"], "txn_checkout")
-        purchase = PremiumPurchase.objects.get(pk=response.data["purchaseId"])
-        self.assertEqual(purchase.user, self.user)
-        self.assertEqual(purchase.paddle_price_id, "pri_wee_premium")
-        self.assertEqual(purchase.amount, 2500)
-        mocked_create.assert_called_once_with(purchase=purchase)
+        self.assertEqual(response.status_code, status.HTTP_410_GONE)
+        self.assertEqual(response.data["code"], "PADDLE_DISABLED")
+        self.assertFalse(PremiumPurchase.objects.exists())
 
     @patch("premium.services.paddle.requests.post")
     def test_paddle_request_uses_server_price_and_user_link(self, mocked_post):
