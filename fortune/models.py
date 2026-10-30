@@ -238,6 +238,7 @@ class FortuneResult(models.Model):
     )
 
     luck_level = models.CharField(max_length=10, default="NORMAL")  # saju.LuckLevel
+    character = models.CharField(max_length=20, blank=True, default="")  # characters.CHARACTERS
     summary = models.CharField(max_length=100, blank=True, default="")
     weather_condition = models.CharField(max_length=20, null=True, blank=True)  # WeatherCondition
 

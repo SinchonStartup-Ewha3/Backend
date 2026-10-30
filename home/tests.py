@@ -140,7 +140,7 @@ class LifeInfoTests(SimpleTestCase):
         info = build_life_info(make_current(), make_hourly(rain_at=3))
         self.assertEqual(info.rain_from_hour, 18)
         self.assertIn("18시", info.message)
-        self.assertEqual(info.character, CharacterState.DEFAULT)  # 지금은 안 옴
+        self.assertEqual(info.character, CharacterState.SUNNY)  # 지금은 안 옴
 
     def test_rain_beyond_12_hours_is_ignored(self):
         info = build_life_info(make_current(), make_hourly(rain_at=20))
@@ -154,6 +154,28 @@ class LifeInfoTests(SimpleTestCase):
         info = build_life_info(make_current(feelsLike=-3.0), make_hourly())
         self.assertEqual(info.character, CharacterState.COLD)
         self.assertEqual(info.outfit_code, "PADDED")
+
+    def test_character_states(self):
+        cases = [
+            (make_current(condition="CLEAR"), CharacterState.SUNNY),
+            (make_current(condition="PARTLY_CLOUDY"), CharacterState.CLOUDY),
+            (make_current(condition="CLOUDY"), CharacterState.CLOUDY),
+            (make_current(condition="RAIN"), CharacterState.RAINY),
+            (make_current(condition="SNOW", feelsLike=1.0), CharacterState.COLD),
+            (make_current(condition="CLEAR", feelsLike=3.0), CharacterState.COLD),
+            (make_current(condition="CLOUDY", windSpeed=10.0), CharacterState.WINDY),
+        ]
+        for current, expected in cases:
+            with self.subTest(current=current, expected=expected):
+                self.assertEqual(build_life_info(current, make_hourly()).character, expected)
+
+    def test_rain_beats_wind_and_cold(self):
+        current = make_current(condition="RAIN", feelsLike=2.0, windSpeed=12.0)
+        self.assertEqual(build_life_info(current, make_hourly()).character, CharacterState.RAINY)
+
+    def test_snow_with_precipitation_is_cold_not_rainy(self):
+        current = make_current(condition="SNOW", feelsLike=10.0, precipitation=1.0)
+        self.assertEqual(build_life_info(current, make_hourly()).character, CharacterState.COLD)
 
     def test_rain_beats_cold_message(self):
         info = build_life_info(make_current(feelsLike=3.0), make_hourly(rain_at=1))

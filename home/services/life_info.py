@@ -9,12 +9,15 @@ BIG_TEMP_GAP = 10          # 일교차 10도 이상
 STRONG_WIND = 9            # m/s
 
 
+CLOUDY_CONDITIONS = {"CLOUDY", "PARTLY_CLOUDY"}
+
+
 class CharacterState(models.TextChoices):
-    DEFAULT = "DEFAULT", "기본"
+    SUNNY = "SUNNY", "맑음"
+    CLOUDY = "CLOUDY", "흐림"
     RAINY = "RAINY", "비"
-    SNOWY = "SNOWY", "눈"
-    COLD = "COLD", "추위"
-    HOT = "HOT", "더위"
+    COLD = "COLD", "추위·눈"
+    WINDY = "WINDY", "바람"
 
 
 # (기준 기온 이상, 코드, 이름) — 위에서부터 처음 맞는 것
@@ -68,16 +71,19 @@ def _outfit(temp: float) -> tuple[str, str]:
 
 
 def _character(current: dict, raining_now: bool, feels: float) -> CharacterState:
-    # 눈 > 비 > 추위 > 더위 > 기본
+    # 홈 캐릭터 5종. 눈 > 비 > 추위 > 바람 > 흐림 > 맑음
+    # 눈이 오면 강수량이 있어도 비가 아니라 눈·추위 캐릭터를 보여준다.
     if current["condition"] == "SNOW":
-        return CharacterState.SNOWY
+        return CharacterState.COLD
     if raining_now:
         return CharacterState.RAINY
     if feels <= 5:
         return CharacterState.COLD
-    if feels >= 28:
-        return CharacterState.HOT
-    return CharacterState.DEFAULT
+    if (current.get("windSpeed") or 0) >= STRONG_WIND:
+        return CharacterState.WINDY
+    if current["condition"] in CLOUDY_CONDITIONS:
+        return CharacterState.CLOUDY
+    return CharacterState.SUNNY
 
 
 def _message(current, feels, raining_now, rain_hour, temp_gap) -> str:
