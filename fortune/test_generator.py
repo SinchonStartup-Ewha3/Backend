@@ -9,6 +9,7 @@ from rest_framework.test import APITestCase
 
 from core.models import Region
 from fortune.models import FortuneProfile, FortuneResult
+from fortune.services.characters import CHARACTERS, CHARACTERS_BY_LEVEL
 from fortune.services.generator import build_fortune_result, get_or_create_fortune_result
 from fortune.services.saju import Element, LuckLevel, day_stem_element, luck_level
 
@@ -48,14 +49,28 @@ class GeneratorTests(TestCase):
         # 나무(을유일생) vs 쇠(경신일) → 금극목 → BAD
         result = build_fortune_result(user=self.user, profile=self.profile, target_date=date(2026, 10, 13))
         self.assertEqual(result["luck_level"], LuckLevel.BAD)
-        self.assertEqual(result["title"], "오늘 운수 안좋은 테루테루")
-        self.assertIn("'물과'", result["detail_text"])  # 나무를 도와주는 건 물
+        self.assertIn(result["character"], CHARACTERS_BY_LEVEL[LuckLevel.BAD])
 
-    def test_rain_changes_item_and_detail(self):
+    def test_character_sets_title_and_lucky_items(self):
+        result = build_fortune_result(user=self.user, profile=self.profile, target_date=date(2026, 10, 13))
+        character = CHARACTERS[result["character"]]
+
+        self.assertEqual(result["title"], character.name)
+        self.assertEqual(result["lucky_color"], character.color)
+        self.assertEqual(result["lucky_item"], character.item)
+        self.assertEqual(result["lucky_place"], character.place)
+        self.assertTrue(result["detail_text"].startswith(character.detail))
+
+    def test_character_catalog(self):
+        grouped = [code for codes in CHARACTERS_BY_LEVEL.values() for code in codes]
+        self.assertEqual(len(CHARACTERS), 24)
+        self.assertCountEqual(grouped, CHARACTERS)  # 24종이 빠짐·중복 없이 등급에 한 번씩
+        self.assertEqual(set(CHARACTERS_BY_LEVEL), set(LuckLevel))
+
+    def test_rain_adds_weather_sentence(self):
         result = build_fortune_result(
             user=self.user, profile=self.profile, target_date=date(2026, 10, 13), weather="RAIN",
         )
-        self.assertIn(result["lucky_item"], ["투명우산", "레인부츠", "방수 파우치"])
         self.assertIn("비가 오는 날", result["detail_text"])
 
     def test_without_location_weather_is_none(self):
@@ -142,6 +157,22 @@ class LegacyResultTests(APITestCase):
         self.assertTrue(res.data["summary"])
         self.assertNotEqual(res.data["title"], "임시 운세")
         self.assertEqual(FortuneResult.objects.filter(user=self.user).count(), 1)
+
+    def test_result_without_character_is_recalculated_keeping_weather(self):
+        from django.utils import timezone
+
+        old = FortuneResult.objects.create(
+            user=self.user, target_date=timezone.localdate(),
+            title="오늘 운수 좋은 테루테루", luck_level="GOOD", summary="예전 요약",
+            weather_condition="SNOW", lucky_color="초록", lucky_item="목도리",
+            lucky_place="공원", detail_text="예전 풀이",
+        )
+
+        res = self.client.get(reverse("today-fortune-result"))
+
+        self.assertEqual(res.data["id"], old.id)
+        self.assertIn(res.data["character"], CHARACTERS)
+        self.assertEqual(res.data["weather_condition"], "SNOW")
 
     def test_new_result_is_not_recalculated(self):
         result = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
