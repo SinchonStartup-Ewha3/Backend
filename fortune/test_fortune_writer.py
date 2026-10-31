@@ -20,10 +20,11 @@ AI_SETTINGS = {
     "OPENAI_TIMEOUT_SECONDS": 8,
 }
 AI_TEXT = (
-    "오늘은 하늘이 맑으니 잠깐이라도 밖에 나가 햇빛을 쐬어보는 거예요. "
-    "자신 있게 고른 선택이 오늘의 기분을 환하게 밝혀 줄 거예요. "
-    "골드 빛 소품 하나를 곁에 두고, 주머니 속 동전처럼 작은 여유를 챙겨보세요. "
-    "쇼핑몰을 천천히 둘러보다 보면 마음에 쏙 드는 무언가를 만날지도 몰라요."
+    "마음속에만 두었던 일을 작게라도 시작하기 좋은 날이에요. 오늘의 흐름이 스스로 움직이려는 힘을 북돋아 주니, "
+    "첫걸음을 내디디면 생각보다 자연스럽게 다음 순서가 보일 수 있어요. 사람들과 이야기할 때는 정답을 서둘러 내기보다 "
+    "상대의 말을 한 번 더 들어주면 관계의 온도가 한결 부드러워질 거예요. 여러 일을 한꺼번에 벌이기보다는 가장 중요한 "
+    "한 가지를 골라 끝까지 마무리해 보세요. 작은 노트에 떠오른 생각을 적어두면 놓치기 쉬운 힌트를 붙잡는 데 도움이 돼요. "
+    "하늘이 맑다면 잠깐 햇빛을 쐬며 머릿속을 환기해보는 것도 오늘의 좋은 마무리가 될 거예요."
 )
 
 
@@ -49,10 +50,16 @@ class WeatherCategoryTests(SimpleTestCase):
             ({"condition": "CLEAR", "feelsLike": -8}, "COLD"),
             ({"condition": "CLOUDY", "windSpeed": 10}, "WINDY"),
             ({"condition": "CLEAR", "minTemperature": 5, "maxTemperature": 16}, "TEMP_GAP"),
+            ({"condition": "FOG"}, "FOG"),
+            ({"condition": "CLEAR", "airQuality": {"grade": "BAD"}}, "FINE_DUST"),
+            ({"airQuality": {"pm10": 81}}, "FINE_DUST"),
         ]
         for weather, expected in cases:
             with self.subTest(weather=weather):
                 self.assertEqual(weather_category(weather), expected)
+
+    def test_all_fifty_lucky_actions_are_registered(self):
+        self.assertEqual(sum(map(len, LUCKY_ACTIONS.values())), 50)
 
     def test_pick_is_stable(self):
         a = pick_lucky_action("RAIN", "1:2026-10-30")
@@ -65,6 +72,8 @@ class FortuneWriterTests(SimpleTestCase):
     def write(self):
         return write_fortune_detail(
             character=CHARACTERS["KING"], luck_label="매우 좋은", summary="요약",
+            target_date=date(2026, 10, 30), birth_element_label="나무",
+            today_element_label="물", energy_relation="오늘의 기운이 사용자를 북돋는 상생 흐름",
             weather_label="맑음", lucky_action=LUCKY_ACTIONS["CLEAR"][0],
         )
 
@@ -83,6 +92,10 @@ class FortuneWriterTests(SimpleTestCase):
         payload = mocked_post.call_args.kwargs["json"]
         self.assertEqual(payload["model"], "test-model")
         self.assertIn("황금왕관 테루테루", payload["input"])
+        self.assertIn("생일 일간 오행: 나무", payload["input"])
+        self.assertIn("두 기운의 관계:", payload["input"])
+        self.assertIn("완성 예시:", payload["instructions"])
+        self.assertIn("하나만 본문에 한 번", payload["instructions"])
         self.assertNotIn("생년월일:", payload["input"])
 
     @override_settings(**AI_SETTINGS)

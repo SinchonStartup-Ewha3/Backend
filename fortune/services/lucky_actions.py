@@ -43,6 +43,12 @@ LUCKY_ACTIONS = {
         "바람이 많이 부는 날엔 창문 단속 한 번 더 확인해보는 거예요.",
         "오늘처럼 바람 센 날엔, 실내에서 할 일을 먼저 끝내보는 게 좋아요.",
     ],
+    "FINE_DUST": [
+        "미세먼지 많은 날엔 마스크와 함께 물 한 잔 더 챙겨 마셔보세요.",
+        "뿌연 하늘인 날엔 창문 대신 공기청정기를 한 번 더 돌려보는 거예요.",
+        "미세먼지 심한 날엔 실내 스트레칭으로 몸을 풀어보는 것도 좋아요.",
+        "오늘 같은 날엔 외출 후 손 씻기, 평소보다 꼼꼼히 해보세요.",
+    ],
     "HOT": [
         "무더운 날엔 시원한 수박 한 조각이 오늘의 행운템이에요.",
         "폭염엔 그늘 따라 걷는 것도 은근히 행운을 부르는 방법이에요.",
@@ -62,6 +68,11 @@ LUCKY_ACTIONS = {
         "오늘처럼 아침저녁 기온 차가 큰 날엔, 목을 따뜻하게 감싸보세요.",
         "일교차 심한 날엔 따뜻한 물 한 잔으로 하루를 시작해보는 거예요.",
     ],
+    "FOG": [
+        "안개 낀 날엔 평소보다 천천히, 조심조심 걸어보세요.",
+        "뿌연 아침엔 좋아하는 음악으로 기분을 또렷하게 만들어보는 거예요.",
+        "안개 낀 날엔 시야가 트일 때까지, 잠깐의 여유를 가져보세요.",
+    ],
 }
 
 CATEGORY_LABELS = {
@@ -70,27 +81,47 @@ CATEGORY_LABELS = {
     "RAIN": "비",
     "SNOW": "눈",
     "WINDY": "강풍",
+    "FINE_DUST": "미세먼지가 많은 날",
     "HOT": "폭염",
     "COLD": "한파",
     "TEMP_GAP": "큰 일교차",
+    "FOG": "안개 낀 날",
 }
 
 RAIN_CONDITIONS = {"RAIN", "SHOWER", "SLEET"}
+FOG_CONDITIONS = {"FOG", "MIST", "HAZE"}
 HOT_FEELS = 33       # 체감온도 33도 이상: 폭염
 COLD_FEELS = -5      # 체감온도 -5도 이하: 한파
 STRONG_WIND = 9      # m/s
 BIG_TEMP_GAP = 10    # 일교차 10도 이상
 
 
+def _has_bad_air_quality(weather: dict) -> bool:
+    air = weather.get("airQuality") or weather.get("air_quality") or {}
+    grade = air.get("grade") or weather.get("airQualityGrade")
+    if grade in {"BAD", "VERY_BAD"}:
+        return True
+    pm10 = air.get("pm10")
+    pm25 = air.get("pm25")
+    return ((pm10 is not None and pm10 > 80)
+            or (pm25 is not None and pm25 > 35))
+
+
 def weather_category(weather: dict | None) -> str | None:
     """오늘 날씨를 행운 행동 분류로 바꾼다. 날씨를 모르면 None."""
-    if not weather or not weather.get("condition"):
+    if not weather:
         return None
-    condition = weather["condition"]
+    condition = weather.get("condition")
     if condition == "SNOW":
         return "SNOW"
     if condition in RAIN_CONDITIONS:
         return "RAIN"
+    if condition in FOG_CONDITIONS:
+        return "FOG"
+    if _has_bad_air_quality(weather):
+        return "FINE_DUST"
+    if not condition:
+        return None
 
     feels = weather.get("feelsLike")
     if feels is not None and feels >= HOT_FEELS:
