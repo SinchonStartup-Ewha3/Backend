@@ -139,12 +139,12 @@ class FortuneAPITests(APITestCase):
         response = self.client.get(reverse("fortune-product-list"))
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        product = next(
-            item
+        products = {
+            item["product_code"]: item
             for item in response.data
-            if item["product_code"] == "FORTUNE_7D"
-        )
-        self.assertEqual(product["price"], 5900)
+        }
+        self.assertEqual(products["FORTUNE_1D"]["price"], 1000)
+        self.assertEqual(products["FORTUNE_7D"]["price"], 5900)
 
     def test_free_today_result_hides_detail_text(self):
         self.create_profile()
