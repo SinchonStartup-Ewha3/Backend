@@ -2,7 +2,7 @@ from datetime import date
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from rest_framework import status
 from rest_framework.test import APITestCase
@@ -96,6 +96,21 @@ class GeneratorTests(TestCase):
 
         self.assertIsNone(result.weather_condition)
         self.assertTrue(result.lucky_item)
+
+    @override_settings(KMA_SERVICE_KEY="test-key")
+    @patch("situations.services.airkorea.get_air_quality", return_value={"grade": "BAD", "pm10": 100})
+    @patch("home.services.weather.get_current_weather", return_value={"condition": "CLEAR"})
+    def test_bad_air_quality_uses_fine_dust_action(self, _, __):
+        region = Region.objects.create(
+            region_code="1114055000", region_name="서울특별시 중구 소공동",
+            lat="37.5638", lng="126.9795", grid_nx=60, grid_ny=127,
+        )
+        self.user.region = region
+        self.user.save()
+
+        result = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
+
+        self.assertTrue(any(action in result.detail_text for action in LUCKY_ACTIONS["FINE_DUST"]))
 
 
 class TodayFortuneAPITests(APITestCase):

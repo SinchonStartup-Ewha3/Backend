@@ -1,6 +1,8 @@
 import hashlib
 import logging
 
+from django.conf import settings
+
 from core.constants import WeatherCondition
 from fortune.models import FortuneResult
 
@@ -10,6 +12,14 @@ from .lucky_actions import CATEGORY_LABELS, pick_lucky_action, weather_category
 from .saju import LuckLevel, day_stem_element, luck_level
 
 logger = logging.getLogger(__name__)
+
+ENERGY_RELATIONS = {
+    LuckLevel.GREAT: "오늘의 기운이 사용자의 기운을 북돋는 상생 흐름",
+    LuckLevel.GOOD: "같은 기운이 겹쳐 장점과 추진력이 또렷해지는 흐름",
+    LuckLevel.NORMAL: "사용자의 기운이 오늘의 흐름으로 흘러가 에너지를 바깥에 쓰기 쉬운 흐름",
+    LuckLevel.CAUTION: "사용자가 오늘의 기운을 조율해야 하므로 힘을 분산하지 않는 것이 중요한 흐름",
+    LuckLevel.BAD: "오늘의 기운이 사용자의 기운을 누를 수 있어 속도를 조절하고 균형을 지키는 흐름",
+}
 
 WEATHER_LABELS = {
     WeatherCondition.CLEAR: "맑은 하루",
@@ -43,10 +53,21 @@ def get_today_weather(user) -> dict | None:
     if grid is None:
         return None
     try:
-        return get_current_weather(*grid)
+        weather = get_current_weather(*grid)
     except Exception:
         logger.warning("운세용 날씨 조회에 실패해 날씨 없이 생성합니다.", exc_info=True)
         return None
+
+    # 기존 에어코리아 데이터를 함께 넣어 미세먼지가 나쁜 날의 행동을 고른다.
+    try:
+        from situations.services.airkorea import get_air_quality
+
+        air_quality = get_air_quality(user.region) if settings.KMA_SERVICE_KEY else None
+        if air_quality:
+            weather["airQuality"] = air_quality
+    except Exception:
+        logger.warning("운세용 미세먼지 조회에 실패해 날씨 정보만 사용합니다.", exc_info=True)
+    return weather
 
 
 def _as_weather(weather) -> dict | None:
@@ -79,6 +100,10 @@ def build_fortune_result(*, user, profile, target_date, weather=None, use_ai=Fal
             character=character,
             luck_label=level.label,
             summary=SUMMARIES[level],
+            target_date=target_date,
+            birth_element_label=my_element.label,
+            today_element_label=today_element.label,
+            energy_relation=ENERGY_RELATIONS[level],
             weather_label=CATEGORY_LABELS.get(category),
             lucky_action=lucky_action,
         ) or detail_text
