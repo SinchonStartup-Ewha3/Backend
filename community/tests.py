@@ -254,7 +254,7 @@ class PostAPITests(APITestCase):
         )
 
         detail_url = reverse(
-            "community:post-update",
+            "community:post-detail",
             kwargs={"post_id": post.pk},
         )
 
@@ -284,6 +284,67 @@ class PostAPITests(APITestCase):
             "padded",
         )
 
+    def test_author_can_remove_existing_image(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="사진을 삭제할 게시물",
+            tag=Post.Tag.CARDIGAN,
+            image=self.make_test_image(),
+        )
+        old_image_name = post.image.name
+        image_storage = post.image.storage
+        self.client.force_authenticate(user=self.author)
+
+        with self.captureOnCommitCallbacks(execute=True):
+            response = self.client.patch(
+                reverse(
+                    "community:post-detail",
+                    kwargs={"post_id": post.pk},
+                ),
+                {"removeImage": True},
+                format="json",
+            )
+
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIsNone(response.data["imageUrl"])
+
+        post.refresh_from_db()
+        self.assertFalse(bool(post.image))
+        self.assertFalse(image_storage.exists(old_image_name))
+
+    def test_image_removal_and_upload_cannot_be_requested_together(self):
+        post = Post.objects.create(
+            user=self.author,
+            region=self.region,
+            content="기존 사진이 있는 게시물",
+            tag=Post.Tag.CARDIGAN,
+            image=self.make_test_image(),
+        )
+        old_image_name = post.image.name
+        self.client.force_authenticate(user=self.author)
+
+        response = self.client.patch(
+            reverse(
+                "community:post-detail",
+                kwargs={"post_id": post.pk},
+            ),
+            {
+                "removeImage": True,
+                "image": self.make_test_image(),
+            },
+            format="multipart",
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_400_BAD_REQUEST,
+        )
+        self.assertIn("removeImage", response.data)
+
+        post.refresh_from_db()
+        self.assertEqual(post.image.name, old_image_name)
+
     def test_other_user_cannot_update_post(self):
         post = Post.objects.create(
             user=self.author,
@@ -296,7 +357,7 @@ class PostAPITests(APITestCase):
         )
 
         detail_url = reverse(
-            "community:post-update",
+            "community:post-detail",
             kwargs={"post_id": post.pk},
         )
 
@@ -310,7 +371,7 @@ class PostAPITests(APITestCase):
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_404_NOT_FOUND,
+            status.HTTP_403_FORBIDDEN,
         )
 
         post.refresh_from_db()
@@ -331,7 +392,7 @@ class PostAPITests(APITestCase):
 
         response = self.client.delete(
             reverse(
-                "community:post-update",
+                "community:post-detail",
                 kwargs={"post_id": post.pk},
             )
         )
@@ -355,14 +416,14 @@ class PostAPITests(APITestCase):
 
         response = self.client.delete(
             reverse(
-                "community:post-update",
+                "community:post-detail",
                 kwargs={"post_id": post.pk},
             )
         )
 
         self.assertEqual(
             response.status_code,
-            status.HTTP_404_NOT_FOUND,
+            status.HTTP_403_FORBIDDEN,
         )
         self.assertTrue(
             Post.objects.filter(pk=post.pk).exists()
@@ -479,7 +540,7 @@ class PostAPITests(APITestCase):
         )
         self.client.force_authenticate(user=self.author)
         detail_url = reverse(
-            "community:post-update",
+            "community:post-detail",
             kwargs={"post_id": post.pk},
         )
 
@@ -494,6 +555,7 @@ class PostAPITests(APITestCase):
             response.data["content"],
             "상세 조회할 게시물",
         )
+        self.assertTrue(response.data["isMine"])
 
     def test_other_user_can_retrieve_post_detail(self):
         post = Post.objects.create(
@@ -506,13 +568,14 @@ class PostAPITests(APITestCase):
 
         response = self.client.get(
             reverse(
-                "community:post-update",
+                "community:post-detail",
                 kwargs={"post_id": post.pk},
             )
         )
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["postId"], post.pk)
+        self.assertFalse(response.data["isMine"])
 
     def test_guest_can_retrieve_post_detail(self):
         post = Post.objects.create(
@@ -524,7 +587,7 @@ class PostAPITests(APITestCase):
 
         response = self.client.get(
             reverse(
-                "community:post-update",
+                "community:post-detail",
                 kwargs={"post_id": post.pk},
             )
         )
@@ -532,6 +595,20 @@ class PostAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data["postId"], post.pk)
         self.assertFalse(response.data["isLiked"])
+        self.assertFalse(response.data["isMine"])
+
+    def test_missing_post_detail_returns_not_found(self):
+        response = self.client.get(
+            reverse(
+                "community:post-detail",
+                kwargs={"post_id": 999999},
+            )
+        )
+
+        self.assertEqual(
+            response.status_code,
+            status.HTTP_404_NOT_FOUND,
+        )
 
     def test_guest_cannot_update_post(self):
         post = Post.objects.create(
@@ -543,7 +620,7 @@ class PostAPITests(APITestCase):
 
         response = self.client.patch(
             reverse(
-                "community:post-update",
+                "community:post-detail",
                 kwargs={"post_id": post.pk},
             ),
             {"content": "비로그인 수정"},

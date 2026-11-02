@@ -8,7 +8,6 @@ from rest_framework.permissions import (
     AllowAny,
     IsAuthenticated,
     IsAuthenticatedOrReadOnly,
-    SAFE_METHODS,
 )
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -16,7 +15,7 @@ from rest_framework.views import APIView
 from .models import Post, PostLike
 from .pagination import PostPagination
 from .permissions import IsPostAuthorOrReadOnly
-from .serializers import PostSerializer
+from .serializers import PostDetailSerializer, PostSerializer
 from .services.files import delete_storage_file_on_commit
 
 from core.serializers import RegionSerializer
@@ -122,10 +121,10 @@ class LikedPostListView(generics.ListAPIView):
         ).distinct()
 
 
-class PostUpdateView(generics.RetrieveUpdateDestroyAPIView):
-    """작성자 본인에게만 게시물 상세 조회·수정·삭제를 제공한다."""
+class PostDetailView(generics.RetrieveUpdateDestroyAPIView):
+    """게시물 상세 조회와 작성자 전용 수정·삭제를 제공한다."""
 
-    serializer_class = PostSerializer
+    serializer_class = PostDetailSerializer
     permission_classes = [
         IsAuthenticatedOrReadOnly,
         IsPostAuthorOrReadOnly,
@@ -138,10 +137,7 @@ class PostUpdateView(generics.RetrieveUpdateDestroyAPIView):
     lookup_url_kwarg = "post_id"
 
     def get_queryset(self):
-        queryset = _post_queryset(self.request.user)
-        if self.request.method not in SAFE_METHODS:
-            queryset = queryset.filter(user=self.request.user)
-        return queryset
+        return _post_queryset(self.request.user)
 
     def perform_destroy(self, instance):
         image_name = (
