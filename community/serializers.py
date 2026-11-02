@@ -301,4 +301,25 @@ class PostSerializer(serializers.ModelSerializer):
                 )
 
         return instance
+
+
+class PostDetailSerializer(PostSerializer):
+    """게시물 상세 화면에 작성자 여부를 함께 제공한다."""
+
+    isMine = serializers.SerializerMethodField()
+
+    class Meta(PostSerializer.Meta):
+        fields = [*PostSerializer.Meta.fields, "isMine"]
+        read_only_fields = [
+            *PostSerializer.Meta.read_only_fields,
+            "isMine",
+        ]
+
+    def get_isMine(self, obj):
+        request = self.context.get("request")
+        return bool(
+            request
+            and request.user.is_authenticated
+            and obj.user_id == request.user.id
+        )
     
