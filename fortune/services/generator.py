@@ -135,27 +135,40 @@ def build_fortune_result(*, user, profile, target_date, weather=None, use_ai=Fal
 
 
 def is_legacy_result(result) -> bool:
-    """예전 로직으로 만든 결과인지 (새 카테고리 계산 결과가 비어 있음)"""
-    return not result.summary or not result.character or not result.category_fortunes
+    """새 계산 필드 중 채워지지 않은 값이 있는 결과인지 확인한다."""
+    return not all((
+        result.summary,
+        result.character,
+        result.saju_analysis,
+        result.category_fortunes,
+    ))
 
 
 def refresh_legacy_result(result, *, profile, weather=None, use_ai=False):
-    """예전 결과를 새 로직으로 다시 계산해 덮어쓴다. 저장된 날씨가 있으면 그대로 쓴다.
+    """예전 결과에서 비어 있는 필드만 새 로직으로 계산해 채운다.
 
-    지난 결과를 목록에서 한꺼번에 다시 계산할 때는 OpenAI를 부르지 않는다 (use_ai=False).
+    이미 저장한 OpenAI 상세 풀이와 기존 행운 정보는 보존한다. 지난 결과를
+    목록에서 채울 때는 OpenAI를 새로 부르지 않는다 (use_ai=False).
     """
-    if result.weather_condition:
+    if result.weather_snapshot:
+        weather = result.weather_snapshot
+    elif result.weather_condition:
         weather = result.weather_condition
     data = build_fortune_result(
         user=result.user,
         profile=profile,
         target_date=result.target_date,
         weather=weather,
-        use_ai=use_ai,
+        use_ai=use_ai and not result.detail_text,
     )
+    empty_values = (None, "", [], {})
+    update_fields = []
     for field, value in data.items():
-        setattr(result, field, value)
-    result.save(update_fields=list(data))
+        if getattr(result, field) in empty_values:
+            setattr(result, field, value)
+            update_fields.append(field)
+    if update_fields:
+        result.save(update_fields=update_fields)
     return result
 
 

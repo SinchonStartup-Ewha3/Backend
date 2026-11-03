@@ -195,7 +195,11 @@ def _weather_modifiers(weather: dict | None) -> dict[str, int]:
         result["COMMUTE"] -= 9
 
     air = weather.get("airQuality") or {}
-    if air.get("grade") in {"BAD", "VERY_BAD"} or (_number(air.get("pm10")) or 0) > 80:
+    if (
+        air.get("grade") in {"BAD", "VERY_BAD"}
+        or (_number(air.get("pm10")) or 0) > 80
+        or (_number(air.get("pm25")) or 0) > 35
+    ):
         result["WEATHER"] -= 4
         result["COMMUTE"] -= 4
     return result
@@ -279,14 +283,44 @@ def _weather_impact(code: str, weather: dict | None) -> str:
             "WEATHER": "비와 높은 습도가 겹치면 오후에 실제 기운보다 몸이 무겁게 느껴질 수 있어요.",
             "COMMUTE": f"{rain_start}부터 비 가능성이 있어 그 전에 주요 이동을 끝내는 편이 안전해요.",
         }
-        return messages[code]
-    if code == "WEATHER" and humidity is not None and humidity >= 80:
-        return "습도가 높아 실제 기운보다 더 나른하게 느껴질 수 있으니 짧게 자주 움직이는 편이 좋아요."
-    if code == "COMMUTE" and wind is not None and wind >= 7:
-        return "바람이 강하니 도보나 자전거 이동 시간을 평소보다 여유 있게 잡는 편이 좋아요."
-    if code == "WEATHER" and feels_like is not None:
-        return f"현재 체감온도는 {feels_like:g}℃예요. 겉옷과 쉬는 간격을 날씨에 맞춰 조절해보세요."
-    return "큰 날씨 변수는 적어서 오늘의 좋은 흐름을 그대로 활용하기 좋아요."
+        weather_message = messages[code]
+    elif code == "WEATHER" and humidity is not None and humidity >= 80:
+        weather_message = "습도가 높아 실제 기운보다 더 나른하게 느껴질 수 있으니 짧게 자주 움직이는 편이 좋아요."
+    elif code == "COMMUTE" and wind is not None and wind >= 7:
+        weather_message = "바람이 강하니 도보나 자전거 이동 시간을 평소보다 여유 있게 잡는 편이 좋아요."
+    elif code == "WEATHER" and feels_like is not None:
+        weather_message = f"현재 체감온도는 {feels_like:g}℃예요. 겉옷과 쉬는 간격을 날씨에 맞춰 조절해보세요."
+    else:
+        weather_message = "큰 날씨 변수는 적어서 오늘의 좋은 흐름을 그대로 활용하기 좋아요."
+
+    air = weather.get("airQuality") or {}
+    grade = air.get("grade")
+    label = air.get("label") or {
+        "GOOD": "좋음", "NORMAL": "보통", "BAD": "나쁨", "VERY_BAD": "매우 나쁨",
+    }.get(grade)
+    pm10 = _number(air.get("pm10"))
+    pm25 = _number(air.get("pm25"))
+    air_is_bad = (
+        grade in {"BAD", "VERY_BAD"}
+        or (pm10 or 0) > 80
+        or (pm25 or 0) > 35
+    )
+    if code == "WEATHER" and (label or pm10 is not None or pm25 is not None):
+        reading = f"{label} 수준" if label else "확인이 필요한 수준"
+        numbers = []
+        if pm10 is not None:
+            numbers.append(f"PM10 {pm10:g}㎍/㎥")
+        if pm25 is not None:
+            numbers.append(f"PM2.5 {pm25:g}㎍/㎥")
+        measurement = f" ({', '.join(numbers)})" if numbers else ""
+        advice = (
+            " 오래 밖에 있기보다 마스크를 챙기고 실내에서 쉬는 시간을 확보해보세요."
+            if air_is_bad else " 야외 일정도 현재 컨디션에 맞춰 조절해보세요."
+        )
+        weather_message += f" 오늘 미세먼지는 {reading}{measurement}이에요.{advice}"
+    elif code == "COMMUTE" and air_is_bad:
+        weather_message += " 미세먼지가 나쁜 편이니 통학할 때 마스크를 챙겨보세요."
+    return weather_message
 
 
 def _element_intro(analysis: dict) -> str:
@@ -296,7 +330,7 @@ def _element_intro(analysis: dict) -> str:
     if natal_count <= 1:
         return f"사주에 부족했던 {element_name}의 기운이 오늘 들어오면서"
     if natal_count == 2:
-        return f"사주에서 약한 편이었던 {element_name}의 기운이 보완되면서"
+        return f"사주에 자리한 {element_name}의 기운이 오늘 더해지면서"
     return f"오늘 {element_name}의 기운이 한층 강해지면서"
 
 
@@ -307,9 +341,15 @@ def build_campus_fortunes(*, analysis: dict, weather: dict | None) -> list[dict]
     if analysis["combinations"] == analysis["clashes"] == 0:
         relationship_signal = "크게 부딪히는 합충이 없어 관계 흐름은 비교적 잔잔한 편이에요."
     elif analysis["combinations"] > analysis["clashes"]:
-        relationship_signal = "사람을 이어주는 합 기운이 강해서 먼저 다가갈수록 분위기가 부드러워져요."
+        if analysis["combinations"] == 1:
+            relationship_signal = "사람을 이어주는 합 기운이 하나 들어와 먼저 다가가면 분위기가 부드러워질 수 있어요."
+        else:
+            relationship_signal = "사람을 이어주는 합 기운이 도드라져 먼저 다가갈수록 분위기가 부드러워져요."
     elif analysis["clashes"] > analysis["combinations"]:
-        relationship_signal = "부딪힘을 만드는 충 기운이 있으니 말과 반응의 속도를 조금 늦추는 게 좋아요."
+        if analysis["clashes"] == 1:
+            relationship_signal = "작은 부딪힘을 만드는 충 기운이 하나 보여 말과 반응의 속도를 조금 늦추는 게 좋아요."
+        else:
+            relationship_signal = "부딪힘을 만드는 충 기운이 도드라져 말과 반응의 속도를 조금 늦추는 게 좋아요."
     else:
         relationship_signal = "합과 충이 함께 들어와 가까워지는 흐름과 작은 마찰 가능성이 같이 있어요."
 
