@@ -156,6 +156,7 @@ class FortuneAPITests(APITestCase):
         self.assertTrue(response.data["detail_locked"])
         self.assertTrue(response.data["title"])
         self.assertTrue(response.data["lucky_color"])
+        self.assertIsNone(response.data["category_fortunes"])
 
     def test_paid_today_result_unlocks_detail_text(self):
         self.create_purchase(
@@ -168,6 +169,11 @@ class FortuneAPITests(APITestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIsNotNone(response.data["detail_text"])
         self.assertFalse(response.data["detail_locked"])
+        self.assertEqual(len(response.data["category_fortunes"]), 6)
+        self.assertEqual(
+            set(response.data["category_fortunes"][0]),
+            {"code", "label", "interpretation"},
+        )
 
     def test_expired_payment_confirmation_does_not_unlock_today_detail(self):
         purchase = self.create_purchase(

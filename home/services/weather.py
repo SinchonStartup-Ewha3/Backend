@@ -78,7 +78,13 @@ def _daily_min_max(nx: int, ny: int, now: datetime) -> tuple[float | None, float
     return _to_float(tmn), _to_float(tmx)
 
 
-def get_current_weather(nx: int, ny: int, now: datetime | None = None) -> dict:
+def get_current_weather(
+    nx: int,
+    ny: int,
+    now: datetime | None = None,
+    *,
+    include_hourly: bool = False,
+) -> dict:
     now = now or kma.now_kst()
 
     ncst_date, ncst_time = kma.ultra_srt_ncst_base(now)
@@ -100,7 +106,7 @@ def get_current_weather(nx: int, ny: int, now: datetime | None = None) -> dict:
     condition = to_condition(sky, ncst.get("PTY"))
     min_temp, max_temp = _daily_min_max(nx, ny, now)
 
-    return {
+    result = {
         "observedAt": _parse_dt(ncst_date, ncst_time).isoformat(),
         "temperature": temp,
         "feelsLike": feels_like(temp, humidity, wind, now.month) if temp is not None else None,
@@ -113,15 +119,18 @@ def get_current_weather(nx: int, ny: int, now: datetime | None = None) -> dict:
         "conditionLabel": condition.label,
         "isNight": is_night(now.hour),
     }
+    if include_hourly:
+        result["hourly"] = _hourly_from_forecast(forecast, now, hours=24)
+    return result
 
 
-def get_hourly_weather(nx: int, ny: int, hours: int = 24, now: datetime | None = None) -> list[dict]:
-    now = now or kma.now_kst()
+def _hourly_from_forecast(
+    forecast: dict[datetime, dict[str, str]],
+    now: datetime,
+    *,
+    hours: int,
+) -> list[dict]:
     current_hour = now.replace(minute=0, second=0, microsecond=0)
-    forecast = _group_forecast(
-        kma.fetch_items("getVilageFcst", *kma.vilage_fcst_base(now), nx, ny)
-    )
-
     result = []
     for dt in sorted(forecast):
         if dt < current_hour:
@@ -129,21 +138,12 @@ def get_hourly_weather(nx: int, ny: int, hours: int = 24, now: datetime | None =
         values = forecast[dt]
         condition = to_condition(values.get("SKY"), values.get("PTY"))
 
-        # 시간별 예보의 기온·습도·풍속을 숫자로 변환합니다.
         temperature = _to_float(values.get("TMP"))
         humidity = _to_float(values.get("REH"))
         wind_speed = _to_float(values.get("WSD"))
-
-        # 해당 예보 시각을 기준으로 체감온도를 계산합니다.
         apparent_temperature = (
-            feels_like(
-                temperature,
-                humidity,
-                wind_speed,
-                dt.month,
-            )
-            if temperature is not None
-            else None
+            feels_like(temperature, humidity, wind_speed, dt.month)
+            if temperature is not None else None
         )
 
         result.append({
@@ -161,6 +161,14 @@ def get_hourly_weather(nx: int, ny: int, hours: int = 24, now: datetime | None =
         if len(result) >= hours:
             break
     return result
+
+
+def get_hourly_weather(nx: int, ny: int, hours: int = 24, now: datetime | None = None) -> list[dict]:
+    now = now or kma.now_kst()
+    forecast = _group_forecast(
+        kma.fetch_items("getVilageFcst", *kma.vilage_fcst_base(now), nx, ny)
+    )
+    return _hourly_from_forecast(forecast, now, hours=hours)
 
 def get_user_grid(user) -> tuple[int, int] | None:
     """GPS 사용자는 실제 좌표, 직접 선택한 사용자는 지역 중심 좌표로 격자를 구한다"""

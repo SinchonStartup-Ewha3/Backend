@@ -241,6 +241,9 @@ class FortuneResult(models.Model):
     character = models.CharField(max_length=20, blank=True, default="")  # characters.CHARACTERS
     summary = models.CharField(max_length=100, blank=True, default="")
     weather_condition = models.CharField(max_length=20, null=True, blank=True)  # WeatherCondition
+    weather_snapshot = models.JSONField(default=dict, blank=True)
+    saju_analysis = models.JSONField(default=dict, blank=True)
+    category_fortunes = models.JSONField(default=list, blank=True)
 
     lucky_color = models.CharField(max_length=50)
     lucky_item = models.CharField(max_length=100)

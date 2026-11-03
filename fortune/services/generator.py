@@ -7,9 +7,10 @@ from core.constants import WeatherCondition
 from fortune.models import FortuneResult
 
 from .characters import CHARACTERS, CHARACTERS_BY_LEVEL
+from .campus_fortune import build_campus_fortunes
 from .fortune_writer import write_fortune_detail
 from .lucky_actions import CATEGORY_LABELS, pick_lucky_action, weather_category
-from .saju import LuckLevel, day_stem_element, luck_level
+from .saju import LuckLevel, analyze_daily_saju, day_stem_element, luck_level
 
 logger = logging.getLogger(__name__)
 
@@ -53,7 +54,7 @@ def get_today_weather(user) -> dict | None:
     if grid is None:
         return None
     try:
-        weather = get_current_weather(*grid)
+        weather = get_current_weather(*grid, include_hourly=True)
     except Exception:
         logger.warning("운세용 날씨 조회에 실패해 날씨 없이 생성합니다.", exc_info=True)
         return None
@@ -93,6 +94,15 @@ def build_fortune_result(*, user, profile, target_date, weather=None, use_ai=Fal
     character = CHARACTERS[_pick(CHARACTERS_BY_LEVEL[level], seed + ":character")]
     category = weather_category(weather)
     lucky_action = pick_lucky_action(category, seed)
+    saju_analysis = analyze_daily_saju(
+        birth_date=profile.converted_solar_date,
+        birth_time=None if profile.birth_time_unknown else profile.birth_time,
+        target_date=target_date,
+    )
+    category_fortunes = build_campus_fortunes(
+        analysis=saju_analysis,
+        weather=weather,
+    )
 
     detail_text = " ".join(line for line in [character.detail, lucky_action] if line)
     if use_ai:
@@ -114,6 +124,9 @@ def build_fortune_result(*, user, profile, target_date, weather=None, use_ai=Fal
         "luck_level": level.value,
         "summary": SUMMARIES[level],
         "weather_condition": weather["condition"] if weather else None,
+        "weather_snapshot": weather or {},
+        "saju_analysis": saju_analysis,
+        "category_fortunes": category_fortunes,
         "lucky_color": character.color,
         "lucky_item": character.item,
         "lucky_place": character.place,
@@ -122,27 +135,48 @@ def build_fortune_result(*, user, profile, target_date, weather=None, use_ai=Fal
 
 
 def is_legacy_result(result) -> bool:
-    """예전 로직으로 만든 결과인지 (요약 문구나 캐릭터가 비어 있음)"""
-    return not result.summary or not result.character
+    """새 계산 필드 중 채워지지 않은 값이 있는 결과인지 확인한다."""
+    return not all((
+        result.summary,
+        result.character,
+        result.saju_analysis,
+        result.category_fortunes,
+    ))
 
 
 def refresh_legacy_result(result, *, profile, weather=None, use_ai=False):
-    """예전 결과를 새 로직으로 다시 계산해 덮어쓴다. 저장된 날씨가 있으면 그대로 쓴다.
+    """결과가 만들어진 세대에 맞춰 전체 재계산 또는 빈 필드 보완을 수행한다.
 
-    지난 결과를 목록에서 한꺼번에 다시 계산할 때는 OpenAI를 부르지 않는다 (use_ai=False).
+    summary나 character가 없는 구형 결과는 캐릭터와 문구가 한 세트로 맞도록
+    전체를 다시 계산한다. 두 값이 모두 있는 결과는 기존 OpenAI 상세 풀이와
+    행운 정보를 보존하고 새 계산 필드 중 빈 값만 채운다.
     """
-    if result.weather_condition:
+    requires_full_refresh = not result.summary or not result.character
+    if result.weather_snapshot:
+        weather = result.weather_snapshot
+    elif result.weather_condition:
         weather = result.weather_condition
     data = build_fortune_result(
         user=result.user,
         profile=profile,
         target_date=result.target_date,
         weather=weather,
-        use_ai=use_ai,
+        use_ai=use_ai if requires_full_refresh else use_ai and not result.detail_text,
     )
+    if requires_full_refresh:
+        for field, value in data.items():
+            setattr(result, field, value)
+        result.save(update_fields=list(data))
+        return result
+
+    empty_values = (None, "", [], {})
+    update_fields = []
     for field, value in data.items():
-        setattr(result, field, value)
-    result.save(update_fields=list(data))
+        if getattr(result, field) in empty_values:
+            setattr(result, field, value)
+            update_fields.append(field)
+    if update_fields:
+        result.save(update_fields=update_fields)
     return result
 
 

@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, time
 from unittest.mock import patch
 
 from django.contrib.auth import get_user_model
@@ -10,9 +10,17 @@ from rest_framework.test import APITestCase
 from core.models import Region
 from fortune.models import FortuneProfile, FortuneResult
 from fortune.services.characters import CHARACTERS, CHARACTERS_BY_LEVEL
+from fortune.services.campus_fortune import build_campus_fortunes
 from fortune.services.generator import build_fortune_result, get_or_create_fortune_result
 from fortune.services.lucky_actions import LUCKY_ACTIONS
-from fortune.services.saju import Element, LuckLevel, day_stem_element, luck_level
+from fortune.services.saju import (
+    TEN_GOD_LABELS,
+    Element,
+    LuckLevel,
+    analyze_daily_saju,
+    day_stem_element,
+    luck_level,
+)
 
 User = get_user_model()
 
@@ -30,6 +38,46 @@ class SajuTests(TestCase):
         self.assertEqual(luck_level(Element.WOOD, Element.FIRE), LuckLevel.NORMAL)    # 목생화
         self.assertEqual(luck_level(Element.WOOD, Element.EARTH), LuckLevel.CAUTION)  # 목극토
         self.assertEqual(luck_level(Element.WOOD, Element.METAL), LuckLevel.BAD)      # 금극목
+
+    def test_daily_analysis_uses_birth_time_when_known(self):
+        unknown = analyze_daily_saju(
+            birth_date=date(2002, 5, 17), birth_time=None,
+            target_date=date(2026, 10, 13),
+        )
+        known = analyze_daily_saju(
+            birth_date=date(2002, 5, 17), birth_time=time(12, 30),
+            target_date=date(2026, 10, 13),
+        )
+
+        self.assertEqual(len(unknown["natal_pillars"]), 3)
+        self.assertEqual(len(known["natal_pillars"]), 4)
+        self.assertFalse(unknown["birth_time_known"])
+        self.assertTrue(known["birth_time_known"])
+        self.assertIn(known["daily_ten_gods"]["day"], TEN_GOD_LABELS)
+
+    def test_year_and_month_pillars_change_on_solar_terms(self):
+        before_lichun = analyze_daily_saju(
+            birth_date=date(2002, 5, 17), birth_time=None,
+            target_date=date(2026, 2, 3),
+        )
+        after_lichun = analyze_daily_saju(
+            birth_date=date(2002, 5, 17), birth_time=None,
+            target_date=date(2026, 2, 5),
+        )
+        after_gyeongchip = analyze_daily_saju(
+            birth_date=date(2002, 5, 17), birth_time=None,
+            target_date=date(2026, 3, 6),
+        )
+
+        self.assertEqual(
+            [pillar["value"] for pillar in before_lichun["today_pillars"][:2]],
+            ["을사", "기축"],
+        )
+        self.assertEqual(
+            [pillar["value"] for pillar in after_lichun["today_pillars"][:2]],
+            ["병오", "경인"],
+        )
+        self.assertEqual(after_gyeongchip["today_pillars"][1]["value"], "신묘")
 
 
 class GeneratorTests(TestCase):
@@ -78,6 +126,73 @@ class GeneratorTests(TestCase):
     def test_without_weather_detail_is_character_only(self):
         result = build_fortune_result(user=self.user, profile=self.profile, target_date=date(2026, 10, 13))
         self.assertEqual(result["detail_text"], CHARACTERS[result["character"]].detail)
+
+    def test_builds_six_paid_campus_categories(self):
+        weather = {
+            "condition": "RAIN", "feelsLike": 8, "humidity": 85,
+            "hourly": [{
+                "time": "2026-10-13T16:00:00+09:00", "hour": 16,
+                "condition": "RAIN", "precipitationProbability": 80,
+                "humidity": 88,
+            }],
+        }
+        result = build_fortune_result(
+            user=self.user, profile=self.profile,
+            target_date=date(2026, 10, 13), weather=weather,
+        )
+
+        self.assertEqual(len(result["category_fortunes"]), 6)
+        self.assertEqual(
+            [item["code"] for item in result["category_fortunes"]],
+            ["ACADEMIC", "LOVE", "RELATIONSHIPS", "MONEY", "WEATHER", "COMMUTE"],
+        )
+        for item in result["category_fortunes"]:
+            self.assertEqual(set(item), {"code", "label", "interpretation"})
+            self.assertTrue(item["interpretation"])
+
+    def test_air_quality_is_explained_in_weather_fortune(self):
+        result = build_fortune_result(
+            user=self.user,
+            profile=self.profile,
+            target_date=date(2026, 10, 13),
+            weather={
+                "condition": "CLEAR",
+                "feelsLike": 18,
+                "airQuality": {
+                    "grade": "BAD", "label": "나쁨", "pm10": 100, "pm25": 42,
+                },
+            },
+        )
+        weather_fortune = next(
+            item for item in result["category_fortunes"] if item["code"] == "WEATHER"
+        )
+
+        self.assertIn("미세먼지", weather_fortune["interpretation"])
+        self.assertIn("PM10 100㎍/㎥", weather_fortune["interpretation"])
+
+    def test_two_elements_and_one_combination_use_moderate_wording(self):
+        analysis = analyze_daily_saju(
+            birth_date=self.profile.converted_solar_date,
+            birth_time=None,
+            target_date=date(2026, 10, 13),
+        )
+        today_element = analysis["today_pillars"][2]["stem_element"]
+        analysis["element_counts"][today_element] = 2
+        analysis["combinations"] = 1
+        analysis["clashes"] = 0
+
+        fortunes = build_campus_fortunes(analysis=analysis, weather=None)
+        weather_text = next(
+            item["interpretation"] for item in fortunes if item["code"] == "WEATHER"
+        )
+        relationship_text = next(
+            item["interpretation"] for item in fortunes if item["code"] == "RELATIONSHIPS"
+        )
+
+        self.assertIn("사주에 자리한", weather_text)
+        self.assertNotIn("약한 편", weather_text)
+        self.assertIn("합 기운이 하나", relationship_text)
+        self.assertNotIn("합 기운이 강해서", relationship_text)
 
     def test_without_location_weather_is_none(self):
         result = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
@@ -138,6 +253,12 @@ class TodayFortuneAPITests(APITestCase):
         self.assertEqual(res.data["weather_condition"], "RAIN")
         self.assertEqual(res.data["weather_label"], "비오는 하루")
         self.assertIsNone(res.data["detail_text"])  # 무료는 상세 풀이 잠김
+        self.assertIsNone(res.data["category_fortunes"])
+        self.assertNotIn("saju_analysis", res.data)
+        self.assertNotIn("weather_snapshot", res.data)
+        self.assertTrue(res.data["lucky_color"])
+        self.assertTrue(res.data["lucky_item"])
+        self.assertTrue(res.data["lucky_place"])
 
     @patch("home.services.weather.get_current_weather", return_value={"condition": "RAIN"})
     def test_weather_is_fetched_once_per_day(self, mock_weather):
@@ -173,11 +294,41 @@ class LegacyResultTests(APITestCase):
         legacy = self.make_legacy(timezone.localdate())
 
         res = self.client.get(reverse("today-fortune-result"))
+        legacy.refresh_from_db()
 
-        self.assertEqual(res.data["id"], legacy.id)  # 새 행을 만들지 않고 덮어쓴다
+        self.assertEqual(res.data["id"], legacy.id)  # 새 행 없이 구형 결과 전체를 갱신한다
         self.assertTrue(res.data["summary"])
         self.assertNotEqual(res.data["title"], "임시 운세")
+        self.assertNotEqual(legacy.detail_text, "임시 풀이")
         self.assertEqual(FortuneResult.objects.filter(user=self.user).count(), 1)
+
+    @patch("fortune.services.generator.write_fortune_detail")
+    def test_missing_categories_do_not_overwrite_existing_ai_detail(self, mock_writer):
+        from django.utils import timezone
+
+        existing = FortuneResult.objects.create(
+            user=self.user,
+            target_date=timezone.localdate(),
+            title="기존 운세",
+            character="WIZARD",
+            luck_level="GOOD",
+            summary="기존 요약",
+            lucky_color="파랑",
+            lucky_item="이어폰",
+            lucky_place="도서관",
+            detail_text="OpenAI가 작성한 기존 상세 풀이",
+        )
+
+        get_or_create_fortune_result(
+            user=self.user, target_date=existing.target_date, profile=self.profile,
+        )
+        existing.refresh_from_db()
+
+        self.assertEqual(existing.detail_text, "OpenAI가 작성한 기존 상세 풀이")
+        self.assertEqual(existing.title, "기존 운세")
+        self.assertTrue(existing.saju_analysis)
+        self.assertEqual(len(existing.category_fortunes), 6)
+        mock_writer.assert_not_called()
 
     def test_result_without_character_is_recalculated_keeping_weather(self):
         from django.utils import timezone
@@ -190,10 +341,17 @@ class LegacyResultTests(APITestCase):
         )
 
         res = self.client.get(reverse("today-fortune-result"))
+        old.refresh_from_db()
 
         self.assertEqual(res.data["id"], old.id)
         self.assertIn(res.data["character"], CHARACTERS)
         self.assertEqual(res.data["weather_condition"], "SNOW")
+        character = CHARACTERS[res.data["character"]]
+        self.assertEqual(res.data["title"], character.name)
+        self.assertEqual(res.data["lucky_color"], character.color)
+        self.assertEqual(res.data["lucky_item"], character.item)
+        self.assertEqual(res.data["lucky_place"], character.place)
+        self.assertNotEqual(old.detail_text, "예전 풀이")
 
     def test_new_result_is_not_recalculated(self):
         result = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
