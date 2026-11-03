@@ -145,11 +145,13 @@ def is_legacy_result(result) -> bool:
 
 
 def refresh_legacy_result(result, *, profile, weather=None, use_ai=False):
-    """예전 결과에서 비어 있는 필드만 새 로직으로 계산해 채운다.
+    """결과가 만들어진 세대에 맞춰 전체 재계산 또는 빈 필드 보완을 수행한다.
 
-    이미 저장한 OpenAI 상세 풀이와 기존 행운 정보는 보존한다. 지난 결과를
-    목록에서 채울 때는 OpenAI를 새로 부르지 않는다 (use_ai=False).
+    summary나 character가 없는 구형 결과는 캐릭터와 문구가 한 세트로 맞도록
+    전체를 다시 계산한다. 두 값이 모두 있는 결과는 기존 OpenAI 상세 풀이와
+    행운 정보를 보존하고 새 계산 필드 중 빈 값만 채운다.
     """
+    requires_full_refresh = not result.summary or not result.character
     if result.weather_snapshot:
         weather = result.weather_snapshot
     elif result.weather_condition:
@@ -159,8 +161,14 @@ def refresh_legacy_result(result, *, profile, weather=None, use_ai=False):
         profile=profile,
         target_date=result.target_date,
         weather=weather,
-        use_ai=use_ai and not result.detail_text,
+        use_ai=use_ai if requires_full_refresh else use_ai and not result.detail_text,
     )
+    if requires_full_refresh:
+        for field, value in data.items():
+            setattr(result, field, value)
+        result.save(update_fields=list(data))
+        return result
+
     empty_values = (None, "", [], {})
     update_fields = []
     for field, value in data.items():

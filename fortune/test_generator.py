@@ -294,10 +294,12 @@ class LegacyResultTests(APITestCase):
         legacy = self.make_legacy(timezone.localdate())
 
         res = self.client.get(reverse("today-fortune-result"))
+        legacy.refresh_from_db()
 
-        self.assertEqual(res.data["id"], legacy.id)  # 새 행 없이 비어 있던 필드만 채운다
+        self.assertEqual(res.data["id"], legacy.id)  # 새 행 없이 구형 결과 전체를 갱신한다
         self.assertTrue(res.data["summary"])
-        self.assertEqual(res.data["title"], "임시 운세")
+        self.assertNotEqual(res.data["title"], "임시 운세")
+        self.assertNotEqual(legacy.detail_text, "임시 풀이")
         self.assertEqual(FortuneResult.objects.filter(user=self.user).count(), 1)
 
     @patch("fortune.services.generator.write_fortune_detail")
@@ -339,10 +341,17 @@ class LegacyResultTests(APITestCase):
         )
 
         res = self.client.get(reverse("today-fortune-result"))
+        old.refresh_from_db()
 
         self.assertEqual(res.data["id"], old.id)
         self.assertIn(res.data["character"], CHARACTERS)
         self.assertEqual(res.data["weather_condition"], "SNOW")
+        character = CHARACTERS[res.data["character"]]
+        self.assertEqual(res.data["title"], character.name)
+        self.assertEqual(res.data["lucky_color"], character.color)
+        self.assertEqual(res.data["lucky_item"], character.item)
+        self.assertEqual(res.data["lucky_place"], character.place)
+        self.assertNotEqual(old.detail_text, "예전 풀이")
 
     def test_new_result_is_not_recalculated(self):
         result = get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
