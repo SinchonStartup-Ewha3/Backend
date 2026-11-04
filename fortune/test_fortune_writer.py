@@ -28,11 +28,12 @@ AI_TEXT = (
 )
 
 
-def ai_response(text):
+def ai_response(text, status="completed"):
     return Mock(
         status_code=200,
         raise_for_status=Mock(),
         json=Mock(return_value={
+            "status": status,
             "output": [{"type": "message", "content": [{"type": "output_text", "text": text}]}],
         }),
     )
@@ -53,6 +54,9 @@ class WeatherCategoryTests(SimpleTestCase):
             ({"condition": "FOG"}, "FOG"),
             ({"condition": "CLEAR", "airQuality": {"grade": "BAD"}}, "FINE_DUST"),
             ({"airQuality": {"pm10": 81}}, "FINE_DUST"),
+            ({"condition": "CLOUDY", "humidity": 97, "windSpeed": 0.5}, "FOG"),
+            ({"condition": "CLOUDY", "humidity": 97, "windSpeed": 3}, "CLOUDY"),
+            ({"condition": "RAIN", "humidity": 99, "windSpeed": 0.5}, "RAIN"),
         ]
         for weather, expected in cases:
             with self.subTest(weather=weather):
@@ -107,6 +111,18 @@ class FortuneWriterTests(SimpleTestCase):
     @patch("fortune.services.fortune_writer.requests.post")
     def test_too_short_text_returns_none(self, mocked_post):
         mocked_post.return_value = ai_response("짧아요")
+        self.assertIsNone(self.write())
+
+    @override_settings(**AI_SETTINGS)
+    @patch("fortune.services.fortune_writer.requests.post")
+    def test_incomplete_response_returns_none(self, mocked_post):
+        mocked_post.return_value = ai_response(AI_TEXT, status="incomplete")
+        self.assertIsNone(self.write())
+
+    @override_settings(**AI_SETTINGS)
+    @patch("fortune.services.fortune_writer.requests.post")
+    def test_text_cut_mid_sentence_returns_none(self, mocked_post):
+        mocked_post.return_value = ai_response(AI_TEXT[:-10])
         self.assertIsNone(self.write())
 
 

@@ -89,7 +89,9 @@ CATEGORY_LABELS = {
 }
 
 RAIN_CONDITIONS = {"RAIN", "SHOWER", "SLEET"}
-FOG_CONDITIONS = {"FOG", "MIST", "HAZE"}
+FOG_CONDITIONS = {"FOG", "MIST", "HAZE"}  # 기상청 단기예보에는 없는 값 (다른 데이터 연결 대비)
+FOG_HUMIDITY = 95    # 습도 95% 이상이고
+FOG_MAX_WIND = 2     # 바람이 2m/s 미만으로 잔잔하면 안개가 끼기 쉬운 날로 본다
 HOT_FEELS = 33       # 체감온도 33도 이상: 폭염
 COLD_FEELS = -5      # 체감온도 -5도 이하: 한파
 STRONG_WIND = 9      # m/s
@@ -107,6 +109,14 @@ def _has_bad_air_quality(weather: dict) -> bool:
             or (pm25 is not None and pm25 > 35))
 
 
+def _is_foggy(weather: dict) -> bool:
+    """기상청 단기예보에는 안개 항목이 없어 습도와 풍속으로 안개 낀 날을 추정한다."""
+    humidity = weather.get("humidity")
+    wind = weather.get("windSpeed")
+    return (humidity is not None and humidity >= FOG_HUMIDITY
+            and wind is not None and wind < FOG_MAX_WIND)
+
+
 def weather_category(weather: dict | None) -> str | None:
     """오늘 날씨를 행운 행동 분류로 바꾼다. 날씨를 모르면 None."""
     if not weather:
@@ -122,6 +132,8 @@ def weather_category(weather: dict | None) -> str | None:
         return "FINE_DUST"
     if not condition:
         return None
+    if _is_foggy(weather):
+        return "FOG"
 
     feels = weather.get("feelsLike")
     if feels is not None and feels >= HOT_FEELS:

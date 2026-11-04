@@ -228,6 +228,23 @@ class GeneratorTests(TestCase):
         self.assertTrue(any(action in result.detail_text for action in LUCKY_ACTIONS["FINE_DUST"]))
 
 
+    @override_settings(KMA_SERVICE_KEY="test-key")
+    @patch("situations.services.airkorea.get_air_quality", return_value=None)
+    @patch("home.services.weather.get_current_weather", return_value={"condition": "CLEAR"})
+    def test_gps_user_without_region_uses_nearest_region_for_air(self, _, mocked_air):
+        region = Region.objects.create(
+            region_code="1114055000", region_name="서울특별시 중구 소공동",
+            lat="37.5638", lng="126.9795", grid_nx=60, grid_ny=127,
+        )
+        self.user.location_mode = User.LocationMode.GPS
+        self.user.last_lat, self.user.last_lng = "37.563800", "126.979500"
+        self.user.save()
+
+        get_or_create_fortune_result(user=self.user, target_date=date(2026, 10, 13))
+
+        mocked_air.assert_called_once_with(region)
+
+
 class TodayFortuneAPITests(APITestCase):
     def setUp(self):
         self.region = Region.objects.create(

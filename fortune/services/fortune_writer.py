@@ -8,6 +8,7 @@ logger = logging.getLogger(__name__)
 
 MIN_LENGTH = 200
 MAX_LENGTH = 750
+SENTENCE_ENDINGS = (".", "!", "요", "다")
 
 INSTRUCTIONS = (
     "당신은 날씨 사주 앱 WEE의 '오늘의 운세' 작가입니다. "
@@ -82,7 +83,7 @@ def write_fortune_detail(
         "model": settings.OPENAI_FORTUNE_MODEL,
         "instructions": INSTRUCTIONS,
         "input": "\n".join(lines),
-        "max_output_tokens": 700,
+        "max_output_tokens": 1200,
     }
     headers = {
         "Authorization": f"Bearer {settings.OPENAI_API_KEY}",
@@ -97,9 +98,15 @@ def write_fortune_detail(
             timeout=settings.OPENAI_TIMEOUT_SECONDS,
         )
         response.raise_for_status()
-        text = " ".join(_extract_output_text(response.json()).split())
+        data = response.json()
+        if data.get("status") == "incomplete":
+            # 토큰 한도 등으로 중간에 끊긴 응답은 쓰지 않는다.
+            raise ValueError(f"운세 풀이가 끝까지 생성되지 않았습니다: {data.get('incomplete_details')}")
+        text = " ".join(_extract_output_text(data).split())
         if not MIN_LENGTH <= len(text) <= MAX_LENGTH:
             raise ValueError(f"운세 풀이 길이가 범위를 벗어났습니다: {len(text)}자")
+        if not text.endswith(SENTENCE_ENDINGS):
+            raise ValueError("운세 풀이가 문장 중간에서 끝났습니다.")
         return text
     except Exception:
         logger.exception("OpenAI 운세 풀이 생성에 실패해 기본 풀이를 사용합니다.")

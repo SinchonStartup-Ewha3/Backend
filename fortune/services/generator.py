@@ -46,6 +46,17 @@ def _pick(options, seed: str):
     return options[int(digest, 16) % len(options)]
 
 
+def _user_region(user):
+    """저장 지역이 없는 GPS 사용자는 마지막 좌표에서 가장 가까운 동을 쓴다."""
+    if user.region is not None:
+        return user.region
+    if user.last_lat is None or user.last_lng is None:
+        return None
+    from core.geo import find_nearest_region
+
+    return find_nearest_region(float(user.last_lat), float(user.last_lng))
+
+
 def get_today_weather(user) -> dict | None:
     """사용자 위치의 현재 날씨. 위치가 없거나 기상청 오류면 None"""
     from home.services.weather import get_current_weather, get_user_grid
@@ -63,7 +74,7 @@ def get_today_weather(user) -> dict | None:
     try:
         from situations.services.airkorea import get_air_quality
 
-        air_quality = get_air_quality(user.region) if settings.KMA_SERVICE_KEY else None
+        air_quality = get_air_quality(_user_region(user)) if settings.KMA_SERVICE_KEY else None
         if air_quality:
             weather["airQuality"] = air_quality
     except Exception:
