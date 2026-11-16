@@ -244,6 +244,7 @@ class FortuneResult(models.Model):
     weather_snapshot = models.JSONField(default=dict, blank=True)
     saju_analysis = models.JSONField(default=dict, blank=True)
     category_fortunes = models.JSONField(default=list, blank=True)
+    daily_message = models.JSONField(default=dict, blank=True)  # 오늘의 한 줄 {title, body}
 
     lucky_color = models.CharField(max_length=50)
     lucky_item = models.CharField(max_length=100)

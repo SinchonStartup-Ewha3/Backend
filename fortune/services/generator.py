@@ -7,7 +7,7 @@ from core.constants import WeatherCondition
 from fortune.models import FortuneResult
 
 from .characters import CHARACTERS, CHARACTERS_BY_LEVEL
-from .campus_fortune import build_campus_fortunes
+from .campus_fortune import build_campus_fortunes, build_daily_message, has_current_categories
 from .fortune_writer import write_fortune_detail
 from .lucky_actions import CATEGORY_LABELS, pick_lucky_action, weather_category
 from .saju import LuckLevel, analyze_daily_saju, day_stem_element, luck_level
@@ -113,7 +113,9 @@ def build_fortune_result(*, user, profile, target_date, weather=None, use_ai=Fal
     category_fortunes = build_campus_fortunes(
         analysis=saju_analysis,
         weather=weather,
+        seed=seed,
     )
+    daily_message = build_daily_message(level=level, weather=weather, lucky_color=character.color)
 
     detail_text = " ".join(line for line in [character.detail, lucky_action] if line)
     if use_ai:
@@ -138,6 +140,7 @@ def build_fortune_result(*, user, profile, target_date, weather=None, use_ai=Fal
         "weather_snapshot": weather or {},
         "saju_analysis": saju_analysis,
         "category_fortunes": category_fortunes,
+        "daily_message": daily_message,
         "lucky_color": character.color,
         "lucky_item": character.item,
         "lucky_place": character.place,
@@ -151,7 +154,8 @@ def is_legacy_result(result) -> bool:
         result.summary,
         result.character,
         result.saju_analysis,
-        result.category_fortunes,
+        result.daily_message,
+        has_current_categories(result.category_fortunes),
     ))
 
 
@@ -183,7 +187,8 @@ def refresh_legacy_result(result, *, profile, weather=None, use_ai=False):
     empty_values = (None, "", [], {})
     update_fields = []
     for field, value in data.items():
-        if getattr(result, field) in empty_values:
+        outdated = field == "category_fortunes" and not has_current_categories(result.category_fortunes)
+        if outdated or getattr(result, field) in empty_values:
             setattr(result, field, value)
             update_fields.append(field)
     if update_fields:
