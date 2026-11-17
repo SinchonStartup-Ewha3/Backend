@@ -267,6 +267,7 @@ class FortuneResultSerializer(serializers.ModelSerializer):
     luck_label = serializers.SerializerMethodField()
     weather_label = serializers.SerializerMethodField()
     category_fortunes = serializers.SerializerMethodField()
+    daily_message = serializers.SerializerMethodField()
 
     def get_luck_label(self, obj):
         return LuckLevel(obj.luck_level).label
@@ -291,6 +292,9 @@ class FortuneResultSerializer(serializers.ModelSerializer):
     def get_category_fortunes(self, obj):
         return obj.category_fortunes if self._can_view_detail() else None
 
+    def get_daily_message(self, obj):
+        return obj.daily_message if self._can_view_detail() else None
+
     class Meta:
         model = FortuneResult
         fields = [
@@ -309,6 +313,7 @@ class FortuneResultSerializer(serializers.ModelSerializer):
             "lucky_place",
             "detail_text",
             "category_fortunes",
+            "daily_message",
             "detail_locked",
         ]
 
