@@ -25,7 +25,7 @@ class LuckLevel(models.TextChoices):
     GOOD = "GOOD", "좋은"
     NORMAL = "NORMAL", "무난한"
     CAUTION = "CAUTION", "조심해야 하는"
-    BAD = "BAD", "안좋은"
+    BAD = "BAD", "안 좋은"
 
 
 # 천간(일간 첫 글자) → 오행
